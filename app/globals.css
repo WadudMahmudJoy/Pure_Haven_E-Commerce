@@ -1,4 +1,4 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 :root {
   --background: #fffaf7;
@@ -30,9 +30,11 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-img {
-  display: block;
-  max-width: 100%;
+@layer base {
+  img {
+    display: block;
+    max-width: 100%;
+  }
 }
 
 button,
@@ -295,10 +297,12 @@ body {
   overflow-x: hidden;
 }
 
-img,
-video {
-  max-width: 100%;
-  height: auto;
+@layer base {
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+  }
 }
 
 .container-ph {
