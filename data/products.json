@@ -1,0 +1,212 @@
+[
+  {
+    "id": 1,
+    "name": "Radiant Glow Serum",
+    "price": 850,
+    "image": "https://images.unsplash.com/photo-1625772452859-1c03d5bf1137?q=80&w=1200&auto=format&fit=crop",
+    "category": "Skincare",
+    "subcategory": "serum",
+    "description": "Hydrating serum for daily skincare.",
+    "stock": 12
+  },
+  {
+    "id": 2,
+    "name": "Velvet Matte Lipstick",
+    "price": 650,
+    "image": "https://images.unsplash.com/photo-1586495777744-4413f21062fa?q=80&w=1200&auto=format&fit=crop",
+    "category": "Cosmetics",
+    "subcategory": "lipstick",
+    "description": "Smooth matte finish lipstick.",
+    "stock": 7
+  },
+  {
+    "id": 3,
+    "name": "Bloom Essence Perfume",
+    "price": 1450,
+    "image": "https://images.unsplash.com/photo-1541643600914-78b084683601?q=80&w=1200&auto=format&fit=crop",
+    "category": "Perfume",
+    "subcategory": "perfume-women",
+    "description": "Long-lasting elegant fragrance.",
+    "stock": 7
+  },
+  {
+    "id": 4,
+    "name": "Natural Honey Jar",
+    "price": 780,
+    "image": "https://images.unsplash.com/photo-1587049352851-8d4e89133924?q=80&w=1200&auto=format&fit=crop",
+    "category": "Food",
+    "subcategory": "honey",
+    "description": "Pure natural honey.",
+    "stock": 13
+  },
+  {
+    "id": 1775681507400,
+    "name": "Neutrogena Hydro Boost",
+    "price": 1200,
+    "image": "/uploads/products/1775681507382-czy7fbeplz5.jpg",
+    "category": "Skincare",
+    "subcategory": "face-wash",
+    "description": "",
+    "stock": 7
+  },
+  {
+    "id": 1775731423880,
+    "name": "Neutrogena Hydro Boost",
+    "price": 200,
+    "image": "/uploads/products/1775731423812-v4300fk1268.jpg",
+    "category": "Skincare",
+    "subcategory": "face-wash",
+    "description": "",
+    "stock": 20
+  },
+  {
+    "id": 1775805393239,
+    "name": "herbal essence",
+    "price": 250,
+    "image": "/uploads/products/15349982-9ea0-4762-8adf-eeb4e8687969-1775805393222-wq3xeeeh.jpg",
+    "category": "Haircare",
+    "subcategory": "shampoo",
+    "description": "",
+    "stock": 23
+  },
+  {
+    "id": 1775806823707,
+    "name": "hydro boost",
+    "price": 1500,
+    "image": "/uploads/products/whatsapp-image-2026-04-07-at-02-29-56-2-1775806823693-yon26bt3.jpg",
+    "category": "Skincare",
+    "subcategory": "moisturizer",
+    "description": "",
+    "stock": 18
+  },
+  {
+    "id": 1776269718921,
+    "name": "Neutrogena Face wash",
+    "price": 800,
+    "image": "/uploads/products/648805242-122103204951286272-45700633640-1776269718906-kd0cnza4.jpg",
+    "category": "Skincare",
+    "subcategory": "face-wash",
+    "description": "",
+    "stock": 49
+  },
+  {
+    "id": 1776269761689,
+    "name": "Neutrogena Face wash",
+    "price": 699,
+    "image": "/uploads/products/649405154-122103204867286272-82151971729-1776269761675-s565hpux.jpg",
+    "category": "Skincare",
+    "subcategory": "face-wash",
+    "description": "",
+    "stock": 29
+  },
+  {
+    "id": 1776269808740,
+    "name": "Rolled oats",
+    "price": 500,
+    "image": "/uploads/products/649593679-122103256113286272-82743845108-1776269808729-pyj2sydf.jpg",
+    "category": "Food",
+    "subcategory": "others",
+    "description": "",
+    "stock": 30
+  },
+  {
+    "id": 1776269901260,
+    "name": "HEINZ MAYONNAISE",
+    "price": 1199,
+    "image": "/uploads/products/650043947-122103389247286272-81342254938-1776269901250-fnpferyl.jpg",
+    "category": "Food",
+    "subcategory": "others",
+    "description": "",
+    "stock": 29
+  },
+  {
+    "id": 1776269976255,
+    "name": "dUNHILL PERFUME",
+    "price": 1800,
+    "image": "/uploads/products/650302693-122103765867286272-68500715523-1776269976243-evkiem5y.jpg",
+    "category": "Perfume",
+    "subcategory": "edt-men",
+    "description": "",
+    "stock": 29
+  },
+  {
+    "id": 1776270049940,
+    "name": "BHA exfoliant",
+    "price": 1600,
+    "image": "/uploads/products/652457129-122103984993286272-61124223255-1776270049927-rnqduc6f.jpg",
+    "category": "Skincare",
+    "subcategory": "scrub",
+    "description": "",
+    "stock": 18
+  },
+  {
+    "id": 1776270123061,
+    "name": "Tea",
+    "price": 450,
+    "image": "/uploads/products/651181708-122104074705286272-91601340415-1776270123048-leghubld.jpg",
+    "category": "Food",
+    "subcategory": "tea",
+    "description": "",
+    "stock": 30
+  },
+  {
+    "id": 1776270905410,
+    "name": "Head & shoulders",
+    "price": 560,
+    "image": "/uploads/products/669529057-122107251489286272-65089048034-1776270905395-56pad28b.jpg",
+    "category": "Haircare",
+    "subcategory": "shampoo",
+    "description": "",
+    "stock": 48
+  },
+  {
+    "id": 1776270984634,
+    "name": "Hydrating Shampoo",
+    "price": 650,
+    "image": "/uploads/products/668125931-122107145511286272-68099502775-1776270984610-46n783zk.jpg",
+    "category": "Haircare",
+    "subcategory": "shampoo",
+    "description": "",
+    "stock": 20
+  },
+  {
+    "id": 1776271045899,
+    "name": "DOUX SMOOTHING SHAMPOO",
+    "price": 900,
+    "image": "/uploads/products/668572750-122107145559286272-56583930925-1776271045883-q2xc5l1o.jpg",
+    "category": "Haircare",
+    "subcategory": "shampoo",
+    "description": "",
+    "stock": 30
+  },
+  {
+    "id": 1776271129755,
+    "name": "Ultra DOUX ULTRA NOURISHING SHAMPOO",
+    "price": 750,
+    "image": "/uploads/products/669132514-122107145583286272-83361524402-1776271129734-z53gwenu.jpg",
+    "category": "Haircare",
+    "subcategory": "shampoo",
+    "description": "",
+    "stock": 58
+  },
+  {
+    "id": 1776521072862,
+    "name": "sunsilk sampoo",
+    "price": 450,
+    "image": "/uploads/products/667844814-122106822753286272-77577150415-1776521072827-uloyz57d.jpg",
+    "category": "Haircare",
+    "subcategory": "shampoo",
+    "description": "",
+    "stock": 19
+  },
+  {
+    "id": 1776838633054,
+    "name": "cosrx cream 200 gm",
+    "price": 1200,
+    "image": "/uploads/products/649593679-122103256113286272-82743845108-1776838633028-dt83hkkd.jpg",
+    "category": "Skincare",
+    "subcategory": "cream",
+    "description": "",
+    "stock": 8
+  }
+]

@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id          Int              @id @default(autoincrement())
+  name        String
+  price       Float
+  compareAtPrice Float?
+  image       String
+  category    String
+  subcategory String?
+  description String?
+  stock       Int              @default(0)
+  isHotDeal   Boolean @default(false)
+  isUpcoming  Boolean @default(false)
+  badgeText   String?
+  badgeTone   String  @default("sale")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  variants    ProductVariant[]
+}
+
+model ProductVariant {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  label     String
+  price     Float
+  stock     Int      @default(0)
+  image     String?
+
+  isHotDeal  Boolean @default(false)
+  isUpcoming Boolean @default(false)
+  badgeTone  String?
+  sortOrder  Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  orderId             String      @unique
+  customerName        String
+  customerPhone       String
+  customerCity        String
+  customerAddress     String
+  subtotal            Float
+  deliveryFee         Float
+  total               Float
+  status              String      @default("pending")
+  paymentMethod       String      @default("Cash on Delivery")
+  paymentStatus       String      @default("pending")
+  paymentProvider     String?
+  paymentSenderNumber String?
+  paymentTrxId        String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  items               OrderItem[]
+}
+
+model OrderItem {
+  id        Int    @id @default(autoincrement())
+  orderId   String
+  productId Int?
+  name      String
+  price     Float
+  compareAtPrice Float?
+  image     String
+  category  String
+  quantity  Int
+
+  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+model Category {
+  id            Int           @id @default(autoincrement())
+  name          String
+  slug          String        @unique
+  image         String?
+  isActive      Boolean       @default(true)
+  sortOrder     Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  subcategories Subcategory[]
+}
+
+model Subcategory {
+  id         Int      @id @default(autoincrement())
+  categoryId Int
+  name       String
+  slug       String
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, slug])
+}
+model HomeSlide {
+  id         Int      @id @default(autoincrement())
+  eyebrow    String   @default("PURE HAVEN BD")
+  title      String
+  subtitle   String
+  image      String
+  href       String   @default("/shop")
+  buttonText String   @default("Shop Now")
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

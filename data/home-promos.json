@@ -1,0 +1,68 @@
+[
+  {
+    "id": "small-1",
+    "kind": "small",
+    "label": "New Arrivals",
+    "title": "New Arrivals",
+    "subtitle": "",
+    "image": "/images/categories/skincare.jpg",
+    "href": "/shop",
+    "isActive": true,
+    "sortOrder": 1
+  },
+  {
+    "id": "small-2",
+    "kind": "small",
+    "label": "Hot Deals",
+    "title": "Hot Deals",
+    "subtitle": "",
+    "image": "/images/categories/haircare.jpg",
+    "href": "/shop",
+    "isActive": true,
+    "sortOrder": 2
+  },
+  {
+    "id": "promo-1779210135020",
+    "kind": "slider",
+    "label": "New Arrivals",
+    "title": "Fresh Beauty Collection",
+    "subtitle": "",
+    "image": "/uploads/products/chatgpt-image-may-19-2026-01-34-05-pm-1779210134987-wap76e0z.png",
+    "href": "/shop",
+    "isActive": true,
+    "sortOrder": 1
+  },
+  {
+    "id": "promo-1779210340972",
+    "kind": "slider",
+    "label": "New Arrivals",
+    "title": "Fresh Beauty Collection",
+    "subtitle": "",
+    "image": "/uploads/products/chatgpt-image-may-19-2026-01-50-31-pm-1779210340925-9a0av2xw.png",
+    "href": "/shop",
+    "isActive": true,
+    "sortOrder": 1
+  },
+  {
+    "id": "promo-1779210806514",
+    "kind": "wide",
+    "label": "Explore Now",
+    "title": "Top Picks",
+    "subtitle": "",
+    "image": "/uploads/products/chatgpt-image-may-19-2026-11-13-14-pm-1779210806446-yp1duqah.png",
+    "href": "/shop",
+    "isActive": true,
+    "sortOrder": 1
+  },
+  {
+    "id": "promo-1780059852285",
+    "kind": "slider",
+    "label": "New Arrivals",
+    "title": "Fresh Beauty Collection",
+    "subtitle": "",
+    "image": "/uploads/products/product-1780059852253-888bbb19-d4a8-4388-9e74-f606c380f67c.png",
+    "href": "/shop",
+    "isActive": true,
+    "sortOrder": 1
+  }
+]

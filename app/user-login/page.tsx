@@ -1,0 +1,295 @@
+"use client";
+
+import { useState } from "react";
+
+export default function UserLoginPage() {
+  const [mode, setMode] = useState<"login" | "register">("login");
+
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+
+  const [name, setName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/customer-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          mode: "login",
+          email: loginEmail,
+          password: loginPassword,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || "Login failed.");
+      }
+
+      localStorage.setItem("pure_haven_customer_logged_in", "true");
+      localStorage.setItem("pure_haven_customer_name", data.user?.name || "");
+      localStorage.setItem("pure_haven_customer_email", data.user?.email || "");
+      localStorage.setItem("pure_haven_customer_phone", data.user?.phone || "");
+
+      window.location.href = "/customer/dashboard";
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Login failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRegister(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/customer-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "register",
+          name,
+          email: registerEmail,
+          phone,
+          password: registerPassword,
+          confirmPassword,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || "Registration failed.");
+      }
+
+      setMessage("Registration successful. Please login now.");
+      setLoginEmail(registerEmail);
+      setMode("login");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Registration failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#fcf8f6] px-4 py-8 md:py-14">
+      <div className="mx-auto w-full max-w-5xl overflow-hidden rounded-[34px] border border-[#ead9d1] bg-white shadow-sm">
+        <div className="grid md:grid-cols-[0.92fr_1.08fr]">
+          {/* Left Info Panel */}
+          <section className="hidden bg-[#2e221d] p-10 text-white md:flex md:flex-col md:justify-between">
+            <div>
+              <a
+                href="/"
+                className="inline-flex rounded-full border border-white/20 px-4 py-2 text-sm font-semibold transition hover:bg-white/10"
+              >
+                ← Back to Home
+              </a>
+
+              <p className="mt-10 text-xs font-bold uppercase tracking-[0.35em] text-white/65">
+                Pure Haven BD
+              </p>
+
+              <h2 className="mt-4 text-4xl font-semibold leading-tight">
+                Your account,
+                <br />
+                your beauty journey.
+              </h2>
+
+              <p className="mt-5 max-w-sm text-sm leading-7 text-white/75">
+                Create an account to keep your shopping experience smoother and easier for future orders.
+              </p>
+            </div>
+
+            <div className="mt-10 grid gap-3 text-sm text-white/85">
+              <div className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3">
+                Faster access to your account
+              </div>
+              <div className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3">
+                Simple login and registration
+              </div>
+              <div className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3">
+                Designed for Pure Haven BD customers
+              </div>
+            </div>
+          </section>
+
+          {/* Form Panel */}
+          <section className="p-5 sm:p-7 md:p-10">
+            <a
+              href="/"
+              className="mb-6 inline-flex rounded-full border border-[#ead9d1] px-4 py-2 text-sm font-semibold text-[#2e221d] hover:bg-[#f8f3ef] md:hidden"
+            >
+              ← Back to Home
+            </a>
+
+            <div className="max-w-xl">
+              <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#7a5244]">
+                Customer Account
+              </p>
+
+              <h1 className="mt-3 text-3xl font-semibold text-[#2e221d] md:text-4xl">
+                {mode === "login" ? "User Login" : "Create User Account"}
+              </h1>
+
+              <p className="mt-3 text-sm leading-6 text-neutral-600">
+                {mode === "login"
+                  ? "Login to your Pure Haven BD customer account."
+                  : "Register to create your Pure Haven BD customer account."}
+              </p>
+
+              {message ? (
+                <div className="mt-5 rounded-2xl border border-[#ead9d1] bg-[#fffaf7] p-4 text-sm text-[#2e221d]">
+                  {message}
+                </div>
+              ) : null}
+
+              <div className="mt-7 grid grid-cols-2 overflow-hidden rounded-full border border-[#ead9d1] bg-[#fffaf7]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("login");
+                    setMessage("");
+                  }}
+                  className={`px-4 py-3 text-sm font-semibold transition ${
+                    mode === "login"
+                      ? "bg-[#2e221d] text-white"
+                      : "text-[#2e221d] hover:bg-[#f8f3ef]"
+                  }`}
+                >
+                  Login
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("register");
+                    setMessage("");
+                  }}
+                  className={`px-4 py-3 text-sm font-semibold transition ${
+                    mode === "register"
+                      ? "bg-[#2e221d] text-white"
+                      : "text-[#2e221d] hover:bg-[#f8f3ef]"
+                  }`}
+                >
+                  Register
+                </button>
+              </div>
+
+              {mode === "login" ? (
+                <form onSubmit={handleLogin} className="mt-7 grid gap-4">
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-[#2e221d]">
+                      Email Address
+                    </span>
+                    <input
+                      type="email"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                      placeholder="Enter your email"
+                      required
+                    />
+                  </label>
+
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-[#2e221d]">
+                      Password
+                    </span>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                      placeholder="Enter your password"
+                      required
+                    />
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="mt-2 rounded-full bg-[#2e221d] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#5e3d32] disabled:opacity-60"
+                  >
+                    {loading ? "Logging in..." : "Login"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleRegister} className="mt-7 grid gap-4">
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                    placeholder="Full name"
+                    required
+                  />
+
+                  <input
+                    type="email"
+                    value={registerEmail}
+                    onChange={(e) => setRegisterEmail(e.target.value)}
+                    className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                    placeholder="Email address"
+                    required
+                  />
+
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                    placeholder="Phone number"
+                    required
+                  />
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <input
+                      type="password"
+                      value={registerPassword}
+                      onChange={(e) => setRegisterPassword(e.target.value)}
+                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                      placeholder="Password"
+                      required
+                    />
+
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                      placeholder="Confirm password"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="mt-2 rounded-full bg-[#2e221d] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#5e3d32] disabled:opacity-60"
+                  >
+                    {loading ? "Creating account..." : "Register"}
+                  </button>
+                </form>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}
