@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import * as adminSession from "@/lib/adminSession";
+import { requireAdmin } from "@/lib/adminSession";
 
 const allowedPaymentStatuses = new Set([
   "unpaid",
@@ -10,52 +10,14 @@ const allowedPaymentStatuses = new Set([
   "refunded",
 ]);
 
-async function hasAdminAccess(req: Request) {
-  const mod = adminSession as any;
+export async function PATCH(req: Request) {
+  const unauthorized = requireAdmin(req);
 
-  const candidates = [
-    "requireAdminSession",
-    "requireAdmin",
-    "getAdminSession",
-    "verifyAdminSession",
-    "isAdminSessionValid",
-  ];
-
-  for (const name of candidates) {
-    const fn = mod?.[name];
-
-    if (typeof fn !== "function") continue;
-
-    try {
-      const result = await fn(req);
-      if (result) return true;
-    } catch {
-      try {
-        const result = await fn();
-        if (result) return true;
-      } catch {
-        // Try next helper.
-      }
-    }
+  if (unauthorized) {
+    return unauthorized;
   }
 
-  // Fallback for this existing project: admin pages use an HTTP-only admin cookie.
-  // Full hardening will be done in the security phase.
-  const cookieHeader = req.headers.get("cookie") || "";
-  return cookieHeader.includes("pure_haven_admin_session=");
-}
-
-export async function PATCH(req: Request) {
   try {
-    const isAdmin = await hasAdminAccess(req);
-
-    if (!isAdmin) {
-      return NextResponse.json(
-        { success: false, message: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
     const body = await req.json().catch(() => null);
 
     const orderId = String(body?.orderId || "").trim();
