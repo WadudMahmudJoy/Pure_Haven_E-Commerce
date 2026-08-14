@@ -6,6 +6,12 @@ import { invalidateProductReadCache } from "@/lib/serverReadCache";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const allowedPaymentMethods = new Set([
+  "Cash on Delivery",
+  "bKash",
+  "Nagad",
+]);
+
 type OrderItemInput = {
   id?: number | string;
   productId?: number | string;
@@ -294,6 +300,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const paymentMethod =
+      normalizeString(body.paymentMethod) || "Cash on Delivery";
+
+    if (!allowedPaymentMethods.has(paymentMethod)) {
+      return NextResponse.json(
+        { success: false, message: "Invalid payment method." },
+        { status: 400 }
+      );
+    }
+
+    const paymentStatus =
+      paymentMethod === "bKash" || paymentMethod === "Nagad"
+        ? "verification_pending"
+        : "pending";
+
     const deliveryFee = 120;
     const orderId = generateOrderId();
 
@@ -368,8 +389,8 @@ export async function POST(req: NextRequest) {
             deliveryFee,
             total,
             status: "pending",
-            paymentMethod: normalizeString(body.paymentMethod) || "Cash on Delivery",
-            paymentStatus: normalizeString(body.paymentStatus) || "pending",
+            paymentMethod,
+            paymentStatus,
             paymentProvider: normalizeString(body.paymentDetails?.provider) || null,
             paymentSenderNumber:
               sanitizePhone(
