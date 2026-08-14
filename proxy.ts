@@ -15,23 +15,40 @@ function base64UrlToString(value: string) {
   return atob(padded);
 }
 
-function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
+/**
+ * Decodes an unpadded base64url string to its raw bytes.
+ *
+ * Returns null (fail-closed) when:
+ *  - the input is empty
+ *  - it contains characters outside the base64url alphabet [A-Za-z0-9\-_]
+ *  - its length is structurally impossible (length % 4 === 1)
+ *  - atob fails for any reason
+ */
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> | null {
+  if (!value) return null;
 
-async function sign(value: string, secret: string) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
-  return bytesToBase64Url(new Uint8Array(signature));
+  // Reject any character outside the unpadded base64url alphabet
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+
+  // A base64url string whose length % 4 === 1 cannot represent a valid
+  // byte sequence regardless of padding (1 base64 digit encodes only 6 bits,
+  // which is insufficient to form even one complete byte).
+  if (value.length % 4 === 1) return null;
+
+  try {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padding = (4 - (base64.length % 4)) % 4;
+    const padded = base64 + "=".repeat(padding);
+    const binary = atob(padded);
+    const buffer = new ArrayBuffer(binary.length);
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
 }
 
 async function isValidAdminToken(token?: string) {
@@ -43,10 +60,27 @@ async function isValidAdminToken(token?: string) {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return false;
 
-  const expectedSignature = await sign(payload, secret);
-  if (signature !== expectedSignature) return false;
+  // Decode the supplied signature to raw bytes; reject malformed input immediately.
+  const signatureBytes = base64UrlToBytes(signature);
+  if (!signatureBytes) return false;
 
   try {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+    const verified = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      signatureBytes,
+      encoder.encode(payload)
+    );
+    if (!verified) return false;
+
     const data = JSON.parse(base64UrlToString(payload));
     return Boolean(data?.sub && data?.exp && Date.now() / 1000 <= Number(data.exp));
   } catch {
