@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "crypto";
 import { promisify } from "util";
@@ -49,16 +49,6 @@ async function verifySecret(secret: string, stored: string) {
   return key.length === expected.length && timingSafeEqual(key, expected);
 }
 
-async function defaultAuth(): Promise<AdminAuth> {
-  return {
-    email: "admin@example.com",
-    passwordHash: await hashSecret("admin123"),
-    recoveryEmail: "admin@example.com",
-    recoveryPhone: "",
-    recoveryCodeHash: await hashSecret("123456"),
-  };
-}
-
 async function writeAuth(auth: AdminAuth) {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(
@@ -78,38 +68,42 @@ async function writeAuth(auth: AdminAuth) {
   );
 }
 
-async function readAuth(): Promise<AdminAuth> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const fallback = await defaultAuth();
-
+async function readAuth(): Promise<AdminAuth | null> {
   try {
     const raw = await readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as RawAdminAuth;
 
+    const email = typeof parsed.email === "string" ? parsed.email.trim() : "";
+    const passwordHash =
+      typeof parsed.passwordHash === "string"
+        ? parsed.passwordHash.trim()
+        : typeof parsed.password === "string"
+          ? parsed.password.trim()
+          : "";
+    const recoveryEmail =
+      typeof parsed.recoveryEmail === "string" ? parsed.recoveryEmail.trim() : "";
+    const recoveryPhone =
+      typeof parsed.recoveryPhone === "string" ? parsed.recoveryPhone.trim() : "";
+    const recoveryCodeHash =
+      typeof parsed.recoveryCodeHash === "string"
+        ? parsed.recoveryCodeHash.trim()
+        : typeof parsed.recoveryCode === "string"
+          ? parsed.recoveryCode.trim()
+          : "";
+
+    if (!email || !passwordHash) {
+      return null;
+    }
+
     return {
-      email: typeof parsed.email === "string" ? parsed.email : fallback.email,
-      passwordHash:
-        typeof parsed.passwordHash === "string"
-          ? parsed.passwordHash
-          : typeof parsed.password === "string"
-            ? parsed.password
-            : fallback.passwordHash,
-      recoveryEmail:
-        typeof parsed.recoveryEmail === "string"
-          ? parsed.recoveryEmail
-          : fallback.recoveryEmail,
-      recoveryPhone:
-        typeof parsed.recoveryPhone === "string" ? parsed.recoveryPhone : "",
-      recoveryCodeHash:
-        typeof parsed.recoveryCodeHash === "string"
-          ? parsed.recoveryCodeHash
-          : typeof parsed.recoveryCode === "string"
-            ? parsed.recoveryCode
-            : fallback.recoveryCodeHash,
+      email,
+      passwordHash,
+      recoveryEmail,
+      recoveryPhone,
+      recoveryCodeHash,
     };
   } catch {
-    await writeAuth(fallback);
-    return fallback;
+    return null;
   }
 }
 
@@ -134,6 +128,13 @@ export async function GET(req: Request) {
   }
 
   const auth = await readAuth();
+  if (!auth) {
+    return NextResponse.json(
+      { success: false, message: "Admin account is not initialized." },
+      { status: 503 }
+    );
+  }
+
   return NextResponse.json({
     success: true,
     email: auth.email,
@@ -149,6 +150,13 @@ export async function POST(req: Request) {
     const password = String(body.password || "");
     const auth = await readAuth();
 
+    if (!auth) {
+      return NextResponse.json(
+        { success: false, message: "Admin account is not initialized." },
+        { status: 503 }
+      );
+    }
+
     const passwordOk = await verifySecret(password, auth.passwordHash);
 
     if (email !== auth.email.toLowerCase() || !passwordOk) {
@@ -158,15 +166,20 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!auth.passwordHash.startsWith("scrypt$") || !auth.recoveryCodeHash.startsWith("scrypt$")) {
+    if (
+      !auth.passwordHash.startsWith("scrypt$") ||
+      (auth.recoveryCodeHash && !auth.recoveryCodeHash.startsWith("scrypt$"))
+    ) {
       await writeAuth({
         ...auth,
         passwordHash: auth.passwordHash.startsWith("scrypt$")
           ? auth.passwordHash
           : await hashSecret(password),
-        recoveryCodeHash: auth.recoveryCodeHash.startsWith("scrypt$")
-          ? auth.recoveryCodeHash
-          : await hashSecret(auth.recoveryCodeHash),
+        recoveryCodeHash: auth.recoveryCodeHash
+          ? auth.recoveryCodeHash.startsWith("scrypt$")
+            ? auth.recoveryCodeHash
+            : await hashSecret(auth.recoveryCodeHash)
+          : "",
       });
     }
 
@@ -186,6 +199,13 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json();
     const oldAuth = await readAuth();
+
+    if (!oldAuth) {
+      return NextResponse.json(
+        { success: false, message: "Admin account is not initialized." },
+        { status: 503 }
+      );
+    }
 
     const email = String(body.email || "").trim().toLowerCase();
     const recoveryEmail = String(body.recoveryEmail || "").trim().toLowerCase();
@@ -214,12 +234,20 @@ export async function PUT(req: Request) {
       );
     }
 
+    const passwordHash = newPassword
+      ? await hashSecret(newPassword)
+      : oldAuth.passwordHash;
+
+    const recoveryCodeHash = recoveryCode
+      ? await hashSecret(recoveryCode)
+      : oldAuth.recoveryCodeHash;
+
     const updated: AdminAuth = {
       email,
-      passwordHash: newPassword ? await hashSecret(newPassword) : oldAuth.passwordHash,
+      passwordHash,
       recoveryEmail: recoveryEmail || oldAuth.recoveryEmail,
       recoveryPhone,
-      recoveryCodeHash: recoveryCode ? await hashSecret(recoveryCode) : oldAuth.recoveryCodeHash,
+      recoveryCodeHash,
     };
 
     await writeAuth(updated);
@@ -247,9 +275,23 @@ export async function PATCH(req: Request) {
     const newPassword = String(body.newPassword || "").trim();
     const auth = await readAuth();
 
+    if (!auth) {
+      return NextResponse.json(
+        { success: false, message: "Admin account is not initialized." },
+        { status: 503 }
+      );
+    }
+
     if (email !== auth.email.toLowerCase()) {
       return NextResponse.json(
         { success: false, message: "Email does not match admin account." },
+        { status: 400 }
+      );
+    }
+
+    if (!auth.recoveryCodeHash) {
+      return NextResponse.json(
+        { success: false, message: "Recovery code is not configured." },
         { status: 400 }
       );
     }
