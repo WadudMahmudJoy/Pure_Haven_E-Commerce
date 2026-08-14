@@ -40,7 +40,12 @@ type ChildInput = {
     | "require-admin-forged"
     | "proxy-forged"
     | "require-admin-valid"
-    | "proxy-valid";
+    | "proxy-valid"
+    | "proxy-mutated-sig"
+    | "proxy-truncated-sig"
+    | "proxy-extended-sig"
+    | "proxy-malformed-sig"
+    | "proxy-expired-token";
 };
 
 async function main() {
@@ -136,6 +141,124 @@ async function main() {
       redirectedToLogin: isRedirectToLogin,
       middlewareAllowed,
       status: res.status,
+    };
+  } else if (payload.action === "proxy-mutated-sig") {
+    // CASE 10: valid token with exactly one character of the signature mutated
+    const validToken = createAdminSessionToken("valid-admin@test.invalid");
+    const dotIndex = validToken.indexOf(".");
+    const tokenPayload = validToken.slice(0, dotIndex);
+    const tokenSig = validToken.slice(dotIndex + 1);
+    // Flip the first character to a different base64url character
+    const firstChar = tokenSig[0];
+    const replacementChar = firstChar === "A" ? "B" : "A";
+    const mutatedSig = replacementChar + tokenSig.slice(1);
+    const mutatedToken = `${tokenPayload}.${mutatedSig}`;
+    const req10 = new NextRequest("http://localhost/admin", {
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${mutatedToken}` },
+    });
+    const res10 = await proxy(req10);
+    const loc10 = res10.headers.get("location") || "";
+    output = {
+      action: "proxy-mutated-sig",
+      redirectedToLogin: res10.status === 307 && loc10.includes("/admin/login"),
+      middlewareAllowed:
+        res10.headers.get("x-middleware-next") === "1" ||
+        (res10.status === 200 && !res10.headers.get("location")),
+      status: res10.status,
+    };
+  } else if (payload.action === "proxy-truncated-sig") {
+    // CASE 11: valid token with its signature truncated by one character
+    const validToken = createAdminSessionToken("valid-admin@test.invalid");
+    const dotIndex = validToken.indexOf(".");
+    const tokenPayload = validToken.slice(0, dotIndex);
+    const tokenSig = validToken.slice(dotIndex + 1);
+    const truncatedToken = `${tokenPayload}.${tokenSig.slice(0, -1)}`;
+    const req11 = new NextRequest("http://localhost/admin", {
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${truncatedToken}` },
+    });
+    const res11 = await proxy(req11);
+    const loc11 = res11.headers.get("location") || "";
+    output = {
+      action: "proxy-truncated-sig",
+      redirectedToLogin: res11.status === 307 && loc11.includes("/admin/login"),
+      middlewareAllowed:
+        res11.headers.get("x-middleware-next") === "1" ||
+        (res11.status === 200 && !res11.headers.get("location")),
+      status: res11.status,
+    };
+  } else if (payload.action === "proxy-extended-sig") {
+    // CASE 12: valid token with one extra base64url character appended to the signature
+    const validToken = createAdminSessionToken("valid-admin@test.invalid");
+    const dotIndex = validToken.indexOf(".");
+    const tokenPayload = validToken.slice(0, dotIndex);
+    const tokenSig = validToken.slice(dotIndex + 1);
+    const extendedToken = `${tokenPayload}.${tokenSig}A`;
+    const req12 = new NextRequest("http://localhost/admin", {
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${extendedToken}` },
+    });
+    const res12 = await proxy(req12);
+    const loc12 = res12.headers.get("location") || "";
+    output = {
+      action: "proxy-extended-sig",
+      redirectedToLogin: res12.status === 307 && loc12.includes("/admin/login"),
+      middlewareAllowed:
+        res12.headers.get("x-middleware-next") === "1" ||
+        (res12.status === 200 && !res12.headers.get("location")),
+      status: res12.status,
+    };
+  } else if (payload.action === "proxy-malformed-sig") {
+    // CASE 13: valid payload paired with a signature containing characters
+    // outside the base64url alphabet (tildes are not in [A-Za-z0-9\-_])
+    const validToken = createAdminSessionToken("valid-admin@test.invalid");
+    const dotIndex = validToken.indexOf(".");
+    const tokenPayload = validToken.slice(0, dotIndex);
+    const malformedToken = `${tokenPayload}.~~~~invalid~~~~`;
+    const req13 = new NextRequest("http://localhost/admin", {
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${malformedToken}` },
+    });
+    const res13 = await proxy(req13);
+    const loc13 = res13.headers.get("location") || "";
+    output = {
+      action: "proxy-malformed-sig",
+      redirectedToLogin: res13.status === 307 && loc13.includes("/admin/login"),
+      middlewareAllowed:
+        res13.headers.get("x-middleware-next") === "1" ||
+        (res13.status === 200 && !res13.headers.get("location")),
+      status: res13.status,
+    };
+  } else if (payload.action === "proxy-expired-token") {
+    // CASE 14: correctly signed token whose exp is in the past.
+    // Signed independently in test code using the test-only secret from env.
+    const testSecret = process.env.ADMIN_SESSION_SECRET;
+    if (!testSecret) {
+      console.error("ADMIN_SESSION_SECRET not set for proxy-expired-token case");
+      process.exit(1);
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expiredPayload = Buffer.from(
+      JSON.stringify({
+        sub: "expired-admin@test.invalid",
+        iat: nowSec - 7200, // issued 2 hours ago
+        exp: nowSec - 3600, // expired 1 hour ago
+      }),
+      "utf8"
+    ).toString("base64url");
+    const expiredSig = createHmac("sha256", testSecret)
+      .update(expiredPayload)
+      .digest("base64url");
+    const expiredToken = `${expiredPayload}.${expiredSig}`;
+    const req14 = new NextRequest("http://localhost/admin", {
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${expiredToken}` },
+    });
+    const res14 = await proxy(req14);
+    const loc14 = res14.headers.get("location") || "";
+    output = {
+      action: "proxy-expired-token",
+      redirectedToLogin: res14.status === 307 && loc14.includes("/admin/login"),
+      middlewareAllowed:
+        res14.headers.get("x-middleware-next") === "1" ||
+        (res14.status === 200 && !res14.headers.get("location")),
+      status: res14.status,
     };
   } else {
     console.error(`Unsupported action: ${String(payload.action)}`);

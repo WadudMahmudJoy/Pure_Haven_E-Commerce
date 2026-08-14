@@ -68,7 +68,12 @@ function runSecretChild(
     | "require-admin-forged"
     | "proxy-forged"
     | "require-admin-valid"
-    | "proxy-valid",
+    | "proxy-valid"
+    | "proxy-mutated-sig"
+    | "proxy-truncated-sig"
+    | "proxy-extended-sig"
+    | "proxy-malformed-sig"
+    | "proxy-expired-token",
   secretMode: "absent" | "empty" | "configured"
 ) {
   const childEnv = { ...process.env };
@@ -259,5 +264,90 @@ test("CASE 9 — Configured secret must allow proxy access", () => {
     result.redirectedToLogin,
     false,
     "Expected proxy.ts not to redirect valid admin request to /admin/login"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 3C Characterization: Proxy Signature Validation Boundary
+// These cases pass against the current implementation and guard the refactor.
+// ---------------------------------------------------------------------------
+
+test("CASE 10 — Mutated valid signature must be rejected by proxy", () => {
+  const result = runSecretChild("proxy-mutated-sig", "configured") as ProxyResult;
+
+  assert.strictEqual(
+    result.middlewareAllowed,
+    false,
+    "proxy.ts must reject a token whose signature has one character mutated"
+  );
+
+  assert.strictEqual(
+    result.redirectedToLogin,
+    true,
+    "Expected proxy.ts to redirect to /admin/login when signature is mutated"
+  );
+});
+
+test("CASE 11 — Truncated signature must be rejected by proxy", () => {
+  const result = runSecretChild("proxy-truncated-sig", "configured") as ProxyResult;
+
+  assert.strictEqual(
+    result.middlewareAllowed,
+    false,
+    "proxy.ts must reject a token whose signature is shorter than the expected HMAC length"
+  );
+
+  assert.strictEqual(
+    result.redirectedToLogin,
+    true,
+    "Expected proxy.ts to redirect to /admin/login when signature is truncated"
+  );
+});
+
+test("CASE 12 — Extended signature must be rejected by proxy", () => {
+  const result = runSecretChild("proxy-extended-sig", "configured") as ProxyResult;
+
+  assert.strictEqual(
+    result.middlewareAllowed,
+    false,
+    "proxy.ts must reject a token whose signature has one extra character appended"
+  );
+
+  assert.strictEqual(
+    result.redirectedToLogin,
+    true,
+    "Expected proxy.ts to redirect to /admin/login when signature is extended"
+  );
+});
+
+test("CASE 13 — Malformed base64url signature must be rejected by proxy", () => {
+  const result = runSecretChild("proxy-malformed-sig", "configured") as ProxyResult;
+
+  assert.strictEqual(
+    result.middlewareAllowed,
+    false,
+    "proxy.ts must deny access when the signature contains characters outside the base64url alphabet"
+  );
+
+  assert.strictEqual(
+    result.redirectedToLogin,
+    true,
+    "Expected proxy.ts to redirect to /admin/login when signature is not valid base64url"
+  );
+});
+
+test("CASE 14 — Correctly signed but expired token must be rejected by proxy", () => {
+  const result = runSecretChild("proxy-expired-token", "configured") as ProxyResult;
+
+  assert.strictEqual(
+    result.middlewareAllowed,
+    false,
+    "proxy.ts must reject a legitimately signed token whose exp field is in the past"
+  );
+
+  assert.strictEqual(
+    result.redirectedToLogin,
+    true,
+    "Expected proxy.ts to redirect to /admin/login for an expired but correctly signed token"
   );
 });
