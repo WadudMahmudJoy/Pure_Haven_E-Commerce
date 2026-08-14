@@ -21,11 +21,19 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { PATCH } from "../app/api/orders/payment-status/route";
 import {
   createAdminSessionToken,
   ADMIN_SESSION_COOKIE,
 } from "../lib/adminSession";
+
+// ---------------------------------------------------------------------------
+// Explicit test-only session secret configuration
+// ---------------------------------------------------------------------------
+// Set a random test-only secret so the test does not depend on .env, .env.local,
+// inherited parent environment secrets, or any hardcoded production fallback.
+process.env.ADMIN_SESSION_SECRET = randomBytes(32).toString("hex");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -129,11 +137,10 @@ test("CASE 3 — Malformed signed-looking token: PATCH must return 401", async (
 });
 
 test("CASE 4 — Valid admin session: PATCH must NOT return 401", async () => {
-  // Generate a cryptographically valid session token using the real production
-  // helper. No secret is hard-coded here; createAdminSessionToken() reads
-  // ADMIN_SESSION_SECRET from the environment (or its documented fallback),
-  // exactly as the route's requireAdmin() guard does. Both sides use the
-  // same key source, so this test is self-consistent without exposing secrets.
+  // Generate a cryptographically valid session token using the real production helper.
+  // This test suite explicitly configures a random test-only ADMIN_SESSION_SECRET.
+  // Both createAdminSessionToken() and requireAdmin() use this configured test secret,
+  // proving valid configured-session behavior without relying on any production fallback.
   //
   // The body is still deliberately empty ({}) so the handler halts at the
   // body-validation guard ("Order id is required." -> HTTP 400) before

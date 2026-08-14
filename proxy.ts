@@ -1,11 +1,12 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const ADMIN_SESSION_COOKIE = "pure_haven_admin_session";
 const LOGIN_PATH = "/admin/login";
 
-function getSessionSecret() {
-  return process.env.ADMIN_SESSION_SECRET || "pure-haven-dev-change-this-secret";
+function getSessionSecret(): string | null {
+  const secret = process.env.ADMIN_SESSION_SECRET;
+  return secret ? secret : null;
 }
 
 function base64UrlToString(value: string) {
@@ -20,11 +21,11 @@ function bytesToBase64Url(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-async function sign(value: string) {
+async function sign(value: string, secret: string) {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(getSessionSecret()),
+    encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -36,10 +37,13 @@ async function sign(value: string) {
 async function isValidAdminToken(token?: string) {
   if (!token || !token.includes(".")) return false;
 
+  const secret = getSessionSecret();
+  if (!secret) return false;
+
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return false;
 
-  const expectedSignature = await sign(payload);
+  const expectedSignature = await sign(payload, secret);
   if (signature !== expectedSignature) return false;
 
   try {

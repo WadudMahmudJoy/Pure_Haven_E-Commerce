@@ -1,12 +1,13 @@
-﻿import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 
 export const ADMIN_SESSION_COOKIE = "pure_haven_admin_session";
 export const LEGACY_ADMIN_COOKIE = "pure_haven_admin_auth";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
-function getSessionSecret() {
-  return process.env.ADMIN_SESSION_SECRET || "pure-haven-dev-change-this-secret";
+function getSessionSecret(): string | null {
+  const secret = process.env.ADMIN_SESSION_SECRET;
+  return secret ? secret : null;
 }
 
 function base64UrlEncode(value: string) {
@@ -17,8 +18,8 @@ function base64UrlDecode(value: string) {
   return Buffer.from(value, "base64url").toString("utf8");
 }
 
-function sign(value: string) {
-  return createHmac("sha256", getSessionSecret()).update(value).digest("base64url");
+function sign(value: string, secret: string) {
+  return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
 function safeEqual(a: string, b: string) {
@@ -41,6 +42,11 @@ function parseCookies(cookieHeader: string | null) {
 }
 
 export function createAdminSessionToken(email: string) {
+  const secret = getSessionSecret();
+  if (!secret) {
+    throw new Error("ADMIN_SESSION_SECRET is not configured.");
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const payload = base64UrlEncode(
     JSON.stringify({
@@ -49,14 +55,17 @@ export function createAdminSessionToken(email: string) {
       exp: now + SESSION_MAX_AGE_SECONDS,
     })
   );
-  return `${payload}.${sign(payload)}`;
+  return `${payload}.${sign(payload, secret)}`;
 }
 
 export function verifyAdminSessionToken(token?: string | null) {
   if (!token || !token.includes(".")) return null;
 
+  const secret = getSessionSecret();
+  if (!secret) return null;
+
   const [payload, signature] = token.split(".");
-  if (!payload || !signature || !safeEqual(signature, sign(payload))) return null;
+  if (!payload || !signature || !safeEqual(signature, sign(payload, secret))) return null;
 
   try {
     const data = JSON.parse(base64UrlDecode(payload));
