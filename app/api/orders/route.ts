@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/adminSession";
 import { invalidateProductReadCache } from "@/lib/serverReadCache";
+import { consumeRateLimit } from "@/lib/rateLimit";
+import {
+  getRateLimitClientKey,
+  ORDER_CREATION_MAX_REQUESTS_PER_CLIENT,
+  ORDER_CREATION_WINDOW_SECONDS,
+} from "@/lib/rateLimitPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -253,6 +259,28 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Rate-limiting check performed BEFORE database transactions or stock checks
+    const clientKey = getRateLimitClientKey(req);
+    const clientBucketKey = `order_create:${clientKey}`;
+
+    const rateLimitRes = consumeRateLimit(
+      clientBucketKey,
+      ORDER_CREATION_MAX_REQUESTS_PER_CLIENT,
+      ORDER_CREATION_WINDOW_SECONDS * 1000
+    );
+
+    if (!rateLimitRes.allowed) {
+      return NextResponse.json(
+        { success: false, message: "Too many orders created. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimitRes.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
     const body = (await req.json()) as OrderBody;
 
     const customerName = getCustomerName(body);

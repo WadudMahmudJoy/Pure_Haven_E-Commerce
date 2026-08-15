@@ -9,6 +9,18 @@ import {
   requireAdmin,
   setAdminSessionCookie,
 } from "@/lib/adminSession";
+import { consumeRateLimit, resetRateLimit } from "@/lib/rateLimit";
+import {
+  ADMIN_LOGIN_GLOBAL_MAX_ATTEMPTS,
+  ADMIN_LOGIN_GLOBAL_WINDOW_SECONDS,
+  ADMIN_LOGIN_MAX_ATTEMPTS_PER_CLIENT,
+  ADMIN_LOGIN_WINDOW_SECONDS,
+  ADMIN_RECOVERY_GLOBAL_MAX_ATTEMPTS,
+  ADMIN_RECOVERY_GLOBAL_WINDOW_SECONDS,
+  ADMIN_RECOVERY_MAX_ATTEMPTS_PER_CLIENT,
+  ADMIN_RECOVERY_WINDOW_SECONDS,
+  getRateLimitClientKey,
+} from "@/lib/rateLimitPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -157,6 +169,46 @@ export async function POST(req: Request) {
       );
     }
 
+    const clientKey = getRateLimitClientKey(req);
+    const clientBucketKey = `admin_login:${clientKey}`;
+    const globalBucketKey = "admin_login:global";
+
+    // 1. Per-client rate limit check (performed before expensive scrypt)
+    const clientLimit = consumeRateLimit(
+      clientBucketKey,
+      ADMIN_LOGIN_MAX_ATTEMPTS_PER_CLIENT,
+      ADMIN_LOGIN_WINDOW_SECONDS * 1000
+    );
+    if (!clientLimit.allowed) {
+      return NextResponse.json(
+        { success: false, message: "Too many attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(clientLimit.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
+    // 2. Process-global login CPU safety valve (performed before expensive scrypt)
+    const globalLimit = consumeRateLimit(
+      globalBucketKey,
+      ADMIN_LOGIN_GLOBAL_MAX_ATTEMPTS,
+      ADMIN_LOGIN_GLOBAL_WINDOW_SECONDS * 1000
+    );
+    if (!globalLimit.allowed) {
+      return NextResponse.json(
+        { success: false, message: "Too many attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(globalLimit.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
     const passwordOk = await verifySecret(password, auth.passwordHash);
 
     if (email !== auth.email.toLowerCase() || !passwordOk) {
@@ -165,6 +217,9 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+
+    // Reset per-client login bucket on successful authentication (global safety bucket remains active)
+    resetRateLimit(clientBucketKey);
 
     if (
       !auth.passwordHash.startsWith("scrypt$") ||
@@ -282,6 +337,28 @@ export async function PATCH(req: Request) {
       );
     }
 
+    const clientKey = getRateLimitClientKey(req);
+    const clientBucketKey = `admin_recovery:${clientKey}`;
+    const globalBucketKey = "admin_recovery:global";
+
+    // 1. Per-client recovery rate limit check (performed before expensive scrypt)
+    const clientLimit = consumeRateLimit(
+      clientBucketKey,
+      ADMIN_RECOVERY_MAX_ATTEMPTS_PER_CLIENT,
+      ADMIN_RECOVERY_WINDOW_SECONDS * 1000
+    );
+    if (!clientLimit.allowed) {
+      return NextResponse.json(
+        { success: false, message: "Too many attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(clientLimit.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
     if (email !== auth.email.toLowerCase()) {
       return NextResponse.json(
         { success: false, message: "Email does not match admin account." },
@@ -293,6 +370,24 @@ export async function PATCH(req: Request) {
       return NextResponse.json(
         { success: false, message: "Recovery code is not configured." },
         { status: 400 }
+      );
+    }
+
+    // 2. Process-global recovery CPU safety valve (performed before expensive scrypt)
+    const globalLimit = consumeRateLimit(
+      globalBucketKey,
+      ADMIN_RECOVERY_GLOBAL_MAX_ATTEMPTS,
+      ADMIN_RECOVERY_GLOBAL_WINDOW_SECONDS * 1000
+    );
+    if (!globalLimit.allowed) {
+      return NextResponse.json(
+        { success: false, message: "Too many attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(globalLimit.retryAfterSeconds),
+          },
+        }
       );
     }
 
@@ -310,6 +405,9 @@ export async function PATCH(req: Request) {
         { status: 400 }
       );
     }
+
+    // Reset per-client recovery bucket on successful recovery (global safety bucket remains active)
+    resetRateLimit(clientBucketKey);
 
     const updated: AdminAuth = {
       ...auth,
