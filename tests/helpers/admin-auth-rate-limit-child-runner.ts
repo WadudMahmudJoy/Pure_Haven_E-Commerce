@@ -86,25 +86,28 @@ export const SYNTHETIC_ADMIN_EMAIL = "synthetic-admin@test.invalid";
 export const SYNTHETIC_ADMIN_PASSWORD = "CorrectSyntheticPassword123!";
 export const SYNTHETIC_RECOVERY_CODE = "SYNTHETIC-RECOVERY-999";
 
+const rawArg = process.argv[2];
+const parsedPayload = rawArg ? (JSON.parse(rawArg) as ChildPayload) : null;
+
 let initialAuthFileContent = "";
 
 async function ensureSyntheticAuthFile() {
   fs.mkdirSync(path.dirname(tempAuthPath), { recursive: true });
   const passwordHash = await hashSecret(SYNTHETIC_ADMIN_PASSWORD);
-  const recoveryCodeHash = await hashSecret(SYNTHETIC_RECOVERY_CODE);
+  const omitRecovery = Boolean(parsedPayload?.omitRecoveryCodeHash);
 
-  initialAuthFileContent = JSON.stringify(
-    {
-      email: SYNTHETIC_ADMIN_EMAIL,
-      passwordHash,
-      recoveryEmail: "recovery@test.invalid",
-      recoveryPhone: "01700000000",
-      recoveryCodeHash,
-    },
-    null,
-    2
-  );
+  const authData: Record<string, string> = {
+    email: SYNTHETIC_ADMIN_EMAIL,
+    passwordHash,
+    recoveryEmail: "recovery@test.invalid",
+    recoveryPhone: "01700000000",
+  };
 
+  if (!omitRecovery) {
+    authData.recoveryCodeHash = await hashSecret(SYNTHETIC_RECOVERY_CODE);
+  }
+
+  initialAuthFileContent = JSON.stringify(authData, null, 2);
   fs.writeFileSync(tempAuthPath, initialAuthFileContent, "utf8");
 }
 
@@ -130,6 +133,7 @@ export type RequestStep = {
 export type ChildPayload = {
   scenario: string;
   steps: RequestStep[];
+  omitRecoveryCodeHash?: boolean;
 };
 
 export type StepResult = {

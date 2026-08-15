@@ -87,7 +87,11 @@ type ChildRunnerOutput = {
   results: StepResult[];
 };
 
-function runChildScenario(scenario: string, steps: RequestStep[]): StepResult[] {
+function runChildScenario(
+  scenario: string,
+  steps: RequestStep[],
+  options?: { omitRecoveryCodeHash?: boolean }
+): StepResult[] {
   const tmpDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "ph-admin-rate-limit-test-")
   );
@@ -105,7 +109,11 @@ function runChildScenario(scenario: string, steps: RequestStep[]): StepResult[] 
         "--tsconfig",
         tsconfigPath,
         childRunnerPath,
-        JSON.stringify({ scenario, steps }),
+        JSON.stringify({
+          scenario,
+          steps,
+          omitRecoveryCodeHash: options?.omitRecoveryCodeHash,
+        }),
       ],
       {
         cwd: tmpDir,
@@ -861,5 +869,163 @@ test("GLOBAL CASE 5 — Cheap wrong-email recovery requests must NOT consume the
   assert.ok(
     request31.scryptCallDelta > 0,
     "Expected request #31 with valid email to reach recovery-code scrypt verification"
+  );
+});
+
+test("RECOVERY ENUMERATION CASE 1 — Wrong email and wrong recovery code must return identical generic 400 responses", () => {
+  const steps: RequestStep[] = [
+    // Scenario A: Wrong admin email, valid formatted recovery code, valid new password
+    {
+      method: "PATCH",
+      clientIp: "198.51.100.101",
+      body: {
+        email: "nonexistent-admin@test.invalid",
+        recoveryCode: "SOME-RECOVERY-CODE",
+        newPassword: "ValidNewPassword123!",
+      },
+    },
+    // Scenario B: Correct admin email, wrong recovery code, valid new password
+    {
+      method: "PATCH",
+      clientIp: "198.51.100.102",
+      body: {
+        email: SYNTHETIC_ADMIN_EMAIL,
+        recoveryCode: "WRONG-RECOVERY-CODE",
+        newPassword: "ValidNewPassword123!",
+      },
+    },
+  ];
+
+  const results = runChildScenario("recovery-account-enumeration-elimination", steps);
+
+  const scenarioA = results[0];
+  const scenarioB = results[1];
+
+  // 1. Both must return HTTP 400
+  assert.strictEqual(
+    scenarioA.status,
+    400,
+    `Expected HTTP 400 for Scenario A (wrong email), got HTTP ${String(scenarioA.status)}`
+  );
+  assert.strictEqual(
+    scenarioB.status,
+    400,
+    `Expected HTTP 400 for Scenario B (wrong recovery code), got HTTP ${String(scenarioB.status)}`
+  );
+
+  // 2. Both must return identical generic error messages
+  assert.strictEqual(
+    scenarioA.message,
+    "Invalid recovery details.",
+    `Expected Scenario A message to be "Invalid recovery details.", got "${scenarioA.message}"`
+  );
+  assert.strictEqual(
+    scenarioB.message,
+    "Invalid recovery details.",
+    `Expected Scenario B message to be "Invalid recovery details.", got "${scenarioB.message}"`
+  );
+  assert.strictEqual(
+    scenarioA.message,
+    scenarioB.message,
+    "Vulnerability confirmed: recovery error messages differed between wrong email and wrong recovery code (account enumeration)"
+  );
+
+  // 3. Cheap pre-scrypt rejection must be preserved for wrong email
+  assert.strictEqual(
+    scenarioA.scryptCallDelta,
+    0,
+    "Wrong-email recovery request must NOT execute scrypt"
+  );
+
+  // 4. Correct email + wrong recovery code must execute scrypt
+  assert.ok(
+    scenarioB.scryptCallDelta > 0,
+    "Correct-email recovery request must execute scrypt verification"
+  );
+});
+
+test("RECOVERY ENUMERATION CASE 2 — Unconfigured recovery code: wrong email and correct email must return identical generic 400 responses", () => {
+  const steps: RequestStep[] = [
+    // Scenario A: Wrong admin email, valid formatted recovery code, valid new password
+    {
+      method: "PATCH",
+      clientIp: "198.51.100.201",
+      body: {
+        email: "nonexistent-admin@test.invalid",
+        recoveryCode: "SOME-RECOVERY-CODE",
+        newPassword: "ValidNewPassword123!",
+      },
+    },
+    // Scenario B: Correct admin email, same recovery code, valid new password
+    {
+      method: "PATCH",
+      clientIp: "198.51.100.202",
+      body: {
+        email: SYNTHETIC_ADMIN_EMAIL,
+        recoveryCode: "SOME-RECOVERY-CODE",
+        newPassword: "ValidNewPassword123!",
+      },
+    },
+  ];
+
+  // Run scenario in a child process where recoveryCodeHash is NOT configured
+  const results = runChildScenario("recovery-unconfigured-enumeration-elimination", steps, {
+    omitRecoveryCodeHash: true,
+  });
+
+  const scenarioA = results[0];
+  const scenarioB = results[1];
+
+  // 1. Both must return HTTP 400
+  assert.strictEqual(
+    scenarioA.status,
+    400,
+    `Expected HTTP 400 for Scenario A (wrong email), got HTTP ${String(scenarioA.status)}`
+  );
+  assert.strictEqual(
+    scenarioB.status,
+    400,
+    `Expected HTTP 400 for Scenario B (correct email, unconfigured recovery), got HTTP ${String(scenarioB.status)}`
+  );
+
+  // 2. Both must return identical generic error messages
+  assert.strictEqual(
+    scenarioA.message,
+    "Invalid recovery details.",
+    `Expected Scenario A message to be "Invalid recovery details.", got "${scenarioA.message}"`
+  );
+  assert.strictEqual(
+    scenarioB.message,
+    "Invalid recovery details.",
+    `Expected Scenario B message to be "Invalid recovery details.", got "${scenarioB.message}"`
+  );
+  assert.strictEqual(
+    scenarioA.message,
+    scenarioB.message,
+    "Vulnerability confirmed: recovery error messages differed when recovery is unconfigured (account enumeration)"
+  );
+
+  // 3. Both must NOT execute scrypt
+  assert.strictEqual(
+    scenarioA.scryptCallDelta,
+    0,
+    "Wrong-email recovery request must NOT execute scrypt"
+  );
+  assert.strictEqual(
+    scenarioB.scryptCallDelta,
+    0,
+    "Unconfigured-recovery request must NOT execute scrypt"
+  );
+
+  // 4. Credential store must remain unchanged
+  assert.strictEqual(
+    scenarioA.authFileUnchanged,
+    true,
+    "Auth store must not be modified by wrong email"
+  );
+  assert.strictEqual(
+    scenarioB.authFileUnchanged,
+    true,
+    "Auth store must not be modified by unconfigured recovery attempt"
   );
 });

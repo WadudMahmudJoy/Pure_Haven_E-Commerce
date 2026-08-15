@@ -361,14 +361,14 @@ export async function PATCH(req: Request) {
 
     if (email !== auth.email.toLowerCase()) {
       return NextResponse.json(
-        { success: false, message: "Email does not match admin account." },
+        { success: false, message: "Invalid recovery details." },
         { status: 400 }
       );
     }
 
     if (!auth.recoveryCodeHash) {
       return NextResponse.json(
-        { success: false, message: "Recovery code is not configured." },
+        { success: false, message: "Invalid recovery details." },
         { status: 400 }
       );
     }
@@ -394,7 +394,7 @@ export async function PATCH(req: Request) {
     const recoveryOk = await verifySecret(recoveryCode, auth.recoveryCodeHash);
     if (!recoveryOk) {
       return NextResponse.json(
-        { success: false, message: "Recovery code is wrong." },
+        { success: false, message: "Invalid recovery details." },
         { status: 400 }
       );
     }
