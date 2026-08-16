@@ -3,14 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 
 type Order = {
-  id?: number;
+  id?: number | string;
   orderId: string;
+  customer?: {
+    name?: string;
+    phone?: string;
+  };
   customerName?: string;
   customerPhone?: string;
   total?: number;
   status?: string;
   paymentMethod?: string;
   paymentStatus?: string;
+  paymentDetails?: {
+    provider?: string;
+    senderNumber?: string;
+    trxId?: string;
+    transactionId?: string;
+  } | null;
   paymentProvider?: string | null;
   paymentSenderNumber?: string | null;
   paymentTrxId?: string | null;
@@ -38,6 +48,59 @@ function statusClass(status: string) {
   if (status === "rejected") return "border-red-200 bg-red-50 text-red-700";
   if (status === "verification_pending") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-stone-200 bg-stone-50 text-stone-700";
+}
+
+export function resolveCustomerName(order: Order): string {
+  return order.customer?.name || order.customerName || "Customer";
+}
+
+export function resolveCustomerPhone(order: Order): string {
+  return order.customer?.phone || order.customerPhone || "No phone";
+}
+
+export function resolvePaymentProvider(order: Order): string {
+  return (
+    order.paymentDetails?.provider ||
+    order.paymentProvider ||
+    order.paymentMethod ||
+    "Manual"
+  );
+}
+
+export function resolvePaymentSenderNumber(order: Order): string {
+  return (
+    order.paymentDetails?.senderNumber ||
+    order.paymentSenderNumber ||
+    "Not provided"
+  );
+}
+
+export function resolvePaymentTrxId(order: Order): string {
+  return (
+    order.paymentDetails?.trxId ||
+    order.paymentDetails?.transactionId ||
+    order.paymentTrxId ||
+    "No trx id"
+  );
+}
+
+export function isPaymentVerificationOrder(order: Order): boolean {
+  const method = String(order.paymentMethod || "").toLowerCase();
+  const status = normalizeStatus(order.paymentStatus);
+  const hasTrxId = Boolean(
+    order.paymentDetails?.trxId ||
+      order.paymentDetails?.transactionId ||
+      order.paymentTrxId
+  );
+
+  return (
+    method.includes("bkash") ||
+    method.includes("nagad") ||
+    hasTrxId ||
+    status === "verification_pending" ||
+    status === "verified" ||
+    status === "rejected"
+  );
 }
 
 export default function PaymentVerificationClient() {
@@ -73,19 +136,7 @@ export default function PaymentVerificationClient() {
   }, []);
 
   const paymentOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const method = String(order.paymentMethod || "").toLowerCase();
-      const status = normalizeStatus(order.paymentStatus);
-
-      return (
-        method.includes("bkash") ||
-        method.includes("nagad") ||
-        Boolean(order.paymentTrxId) ||
-        status === "verification_pending" ||
-        status === "verified" ||
-        status === "rejected"
-      );
-    });
+    return orders.filter(isPaymentVerificationOrder);
   }, [orders]);
 
   async function updatePaymentStatus(order: Order, paymentStatus: string) {
@@ -193,25 +244,25 @@ export default function PaymentVerificationClient() {
 
                       <td className="px-4 py-4">
                         <div className="font-medium text-[#171717]">
-                          {order.customerName || "Customer"}
+                          {resolveCustomerName(order)}
                         </div>
                         <div className="mt-1 text-xs text-[#6f5d54]">
-                          {order.customerPhone || "No phone"}
+                          {resolveCustomerPhone(order)}
                         </div>
                       </td>
 
                       <td className="px-4 py-4">
                         <div className="font-medium text-[#171717]">
-                          {order.paymentProvider || order.paymentMethod || "Manual"}
+                          {resolvePaymentProvider(order)}
                         </div>
                         <div className="mt-1 text-xs text-[#6f5d54]">
-                          Sender: {order.paymentSenderNumber || "Not provided"}
+                          Sender: {resolvePaymentSenderNumber(order)}
                         </div>
                       </td>
 
                       <td className="px-4 py-4">
                         <code className="rounded-lg bg-[#fbf7f4] px-2 py-1 text-xs text-[#2d1f1a]">
-                          {order.paymentTrxId || "No trx id"}
+                          {resolvePaymentTrxId(order)}
                         </code>
                       </td>
 
