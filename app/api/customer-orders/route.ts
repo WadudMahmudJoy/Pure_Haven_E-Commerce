@@ -46,7 +46,38 @@ async function readUsers(): Promise<CustomerUser[]> {
   }
 }
 
-function mapOrder(order: any) {
+function mapOrder(order: {
+  id: string;
+  orderId: string;
+  customerName: string;
+  customerPhone: string;
+  customerCity: string;
+  customerAddress: string;
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+  status: string;
+  paymentMethod: string;
+  paymentStatus: string;
+  paymentProvider: string | null;
+  paymentSenderNumber: string | null;
+  paymentTrxId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  items: Array<{
+    id: number;
+    orderId: string;
+    productId: number | null;
+    variantId?: number | null;
+    variantLabel?: string | null;
+    name: string;
+    price: number;
+    compareAtPrice?: number | null;
+    image: string;
+    category: string;
+    quantity: number;
+  }>;
+}) {
   return {
     id: order.id,
     orderId: order.orderId,
@@ -56,7 +87,19 @@ function mapOrder(order: any) {
       city: order.customerCity,
       address: order.customerAddress,
     },
-    items: order.items,
+    items: (order.items || []).map((item) => ({
+      id: item.id,
+      orderId: item.orderId,
+      productId: item.productId ?? null,
+      variantId: item.variantId ?? null,
+      variantLabel: item.variantLabel ?? null,
+      name: item.name,
+      price: item.price,
+      compareAtPrice: item.compareAtPrice ?? null,
+      image: item.image,
+      category: item.category,
+      quantity: item.quantity,
+    })),
     subtotal: order.subtotal,
     deliveryFee: order.deliveryFee,
     total: order.total,

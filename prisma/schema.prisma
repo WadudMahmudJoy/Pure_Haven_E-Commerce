@@ -67,17 +67,19 @@ model Order {
 }
 
 model OrderItem {
-  id        Int    @id @default(autoincrement())
-  orderId   String
-  productId Int?
-  name      String
-  price     Float
+  id             Int     @id @default(autoincrement())
+  orderId        String
+  productId      Int?
+  variantId      Int?
+  variantLabel   String?
+  name           String
+  price          Float
   compareAtPrice Float?
-  image     String
-  category  String
-  quantity  Int
+  image          String
+  category       String
+  quantity       Int
 
-  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 model Category {
   id            Int           @id @default(autoincrement())
