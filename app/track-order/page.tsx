@@ -4,6 +4,10 @@ import { useState } from "react";
 import TopBar from "@/components/layout/TopBar";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
+import {
+  getOrderStatusLabel,
+  getOrderStatusBadgeClass,
+} from "@/lib/orderPresentation";
 
 type TrackedOrder = {
   orderId?: string;
@@ -30,17 +34,7 @@ type TrackedOrder = {
 };
 
 function statusBadge(status: string) {
-  switch (status) {
-    case "confirmed":
-      return "border-blue-200 bg-blue-50 text-blue-700";
-    case "delivered":
-      return "border-green-200 bg-green-50 text-green-700";
-    case "cancelled":
-      return "border-red-200 bg-red-50 text-red-700";
-    case "pending":
-    default:
-      return "border-amber-200 bg-amber-50 text-amber-700";
-  }
+  return getOrderStatusBadgeClass(status);
 }
 
 function paymentBadge(status: string) {
@@ -175,7 +169,7 @@ export default function TrackOrderPage() {
                       order.status
                     )}`}
                   >
-                    Order: {order.status}
+                    Order: {getOrderStatusLabel(order.status)}
                   </span>
                   <span
                     className={`rounded-full border px-3 py-1 text-xs font-semibold ${paymentBadge(

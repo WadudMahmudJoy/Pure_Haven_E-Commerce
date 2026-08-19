@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  isOrderActive,
+  getOrderStatusLabel,
+  getOrderStatusBadgeClass,
+} from "@/lib/orderPresentation";
 
 type CustomerUser = {
   id: string;
@@ -50,17 +55,6 @@ function money(value?: number) {
 function dateText(value?: string) {
   if (!value) return "N/A";
   return new Date(value).toLocaleString("en-BD");
-}
-
-function statusClass(status?: string) {
-  const value = String(status || "pending").toLowerCase();
-
-  if (value === "delivered") return "border-green-200 bg-green-50 text-green-700";
-  if (value === "cancelled") return "border-red-200 bg-red-50 text-red-700";
-  if (value === "processing") return "border-blue-200 bg-blue-50 text-blue-700";
-  if (value === "confirmed") return "border-amber-200 bg-amber-50 text-amber-700";
-
-  return "border-yellow-200 bg-yellow-50 text-yellow-700";
 }
 
 function itemCount(order: Order) {
@@ -120,9 +114,7 @@ export default function CustomerDashboardClient() {
   const stats = useMemo(() => {
     const totalOrders = orders.length;
     const delivered = orders.filter((order) => order.status === "delivered").length;
-    const pending = orders.filter((order) =>
-      ["pending", "confirmed", "processing"].includes(String(order.status || "pending"))
-    ).length;
+    const pending = orders.filter((order) => isOrderActive(order.status)).length;
 
     const totalSpent = orders
       .filter((order) => order.status !== "cancelled")
@@ -270,8 +262,8 @@ export default function CustomerDashboardClient() {
                       <div>
                         <div className="flex flex-wrap items-center gap-3">
                           <h3 className="text-lg font-bold">{order.orderId}</h3>
-                          <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(status)}`}>
-                            {status}
+                          <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${getOrderStatusBadgeClass(status)}`}>
+                            {getOrderStatusLabel(status)}
                           </span>
                           <span className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs font-semibold text-yellow-700">
                             Payment: {order.paymentStatus || "pending"}
