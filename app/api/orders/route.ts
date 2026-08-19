@@ -8,6 +8,12 @@ import {
   ORDER_CREATION_MAX_REQUESTS_PER_CLIENT,
   ORDER_CREATION_WINDOW_SECONDS,
 } from "@/lib/rateLimitPolicy";
+import {
+  normalizeOrderStatus,
+  normalizeCancellationReason,
+  normalizeDeliveryFailureReason,
+  validateOrderTransition,
+} from "@/lib/orderLifecycle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +57,11 @@ type OrderBody = {
   paymentStatus?: string;
   senderNumber?: string;
   transactionId?: string;
+  cancelledBy?: string;
+  cancellationReason?: string;
+  cancellationNote?: string;
+  deliveryFailureReason?: string;
+  deliveryFailureNote?: string;
   paymentDetails?: {
     provider?: string;
     senderNumber?: string;
@@ -90,39 +101,53 @@ function moneyNumber(value: number) {
   return Number(Number(value || 0).toFixed(2));
 }
 
-function mapOrder(order: {
-  id: string;
-  orderId: string;
-  customerName: string;
-  customerPhone: string;
-  customerCity: string;
-  customerAddress: string;
-  subtotal: number;
-  deliveryFee: number;
-  total: number;
-  status: string;
-  paymentMethod: string;
-  paymentStatus: string;
-  paymentProvider: string | null;
-  paymentSenderNumber: string | null;
-  paymentTrxId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  items: Array<{
-    id: number;
+type MapOrderOptions = {
+  includeAudit?: boolean;
+};
+
+function mapOrder(
+  order: {
+    id: string;
     orderId: string;
-    productId: number | null;
-    variantId?: number | null;
-    variantLabel?: string | null;
-    name: string;
-    price: number;
-    compareAtPrice?: number | null;
-    image: string;
-    category: string;
-    quantity: number;
-  }>;
-}) {
-  return {
+    customerName: string;
+    customerPhone: string;
+    customerCity: string;
+    customerAddress: string;
+    subtotal: number;
+    deliveryFee: number;
+    total: number;
+    status: string;
+    paymentMethod: string;
+    paymentStatus: string;
+    paymentProvider: string | null;
+    paymentSenderNumber: string | null;
+    paymentTrxId: string | null;
+    cancelledBy?: string | null;
+    cancellationReason?: string | null;
+    cancellationNote?: string | null;
+    cancelledAt?: Date | null;
+    deliveryFailureReason?: string | null;
+    deliveryFailureNote?: string | null;
+    deliveryFailedAt?: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    items: Array<{
+      id: number;
+      orderId: string;
+      productId: number | null;
+      variantId?: number | null;
+      variantLabel?: string | null;
+      name: string;
+      price: number;
+      compareAtPrice?: number | null;
+      image: string;
+      category: string;
+      quantity: number;
+    }>;
+  },
+  options: MapOrderOptions = {}
+) {
+  const mapped = {
     id: order.id,
     orderId: order.orderId,
     customer: {
@@ -162,6 +187,23 @@ function mapOrder(order: {
         : null,
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
+  };
+
+  if (!options.includeAudit) {
+    return mapped;
+  }
+
+  return {
+    ...mapped,
+    cancelledBy: order.cancelledBy ?? null,
+    cancellationReason: order.cancellationReason ?? null,
+    cancellationNote: order.cancellationNote ?? null,
+    cancelledAt: order.cancelledAt ? order.cancelledAt.toISOString() : null,
+    deliveryFailureReason: order.deliveryFailureReason ?? null,
+    deliveryFailureNote: order.deliveryFailureNote ?? null,
+    deliveryFailedAt: order.deliveryFailedAt
+      ? order.deliveryFailedAt.toISOString()
+      : null,
   };
 }
 
@@ -234,7 +276,10 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      return NextResponse.json({ success: true, order: mapOrder(matchedOrder) });
+      return NextResponse.json({
+        success: true,
+        order: mapOrder(matchedOrder, { includeAudit: false }),
+      });
     }
 
     const unauthorized = requireAdmin(req);
@@ -255,7 +300,10 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      return NextResponse.json({ success: true, order: mapOrder(order) });
+      return NextResponse.json({
+        success: true,
+        order: mapOrder(order, { includeAudit: true }),
+      });
     }
 
     const orders = await prisma.order.findMany({
@@ -263,7 +311,10 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json({ success: true, orders: orders.map(mapOrder) });
+    return NextResponse.json({
+      success: true,
+      orders: orders.map((order) => mapOrder(order, { includeAudit: true })),
+    });
   } catch (error) {
     console.error("GET /api/orders failed:", error);
     return NextResponse.json(
@@ -487,7 +538,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       message: "Order created successfully.",
-      order: mapOrder(order),
+      order: mapOrder(order, { includeAudit: false }),
     });
   } catch (error) {
     console.error("POST /api/orders failed:", error);
@@ -530,30 +581,169 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const nextStatus = normalizeString(body.status) || existing.status;
+    // Normalize and validate persisted current status (fail closed if corrupt/unknown)
+    const currentStatus = normalizeOrderStatus(existing.status);
+    if (!currentStatus) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Persisted order has an unknown or unsupported status. Mutation rejected.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // Normalize and validate requested target status
+    let targetStatus = currentStatus;
+    if (body.status !== undefined) {
+      const normalizedTarget = normalizeOrderStatus(body.status);
+      if (!normalizedTarget) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid or unsupported target order status.",
+          },
+          { status: 400 }
+        );
+      }
+      targetStatus = normalizedTarget;
+    }
+
+    // Validate status transition against server lifecycle graph
+    const transitionCheck = validateOrderTransition(currentStatus, targetStatus);
+    if (!transitionCheck.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: transitionCheck.message,
+        },
+        { status: 409 }
+      );
+    }
+
+    const isStatusChange = !transitionCheck.noop;
+
+    // Cancellation audit & reason validation
+    let cancellationReason: string | null = null;
+    let cancellationNote: string | null = null;
+    if (isStatusChange && targetStatus === "cancelled") {
+      const normalizedReason = normalizeCancellationReason(body.cancellationReason);
+      if (!normalizedReason) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "A valid cancellation reason is required to cancel an order.",
+          },
+          { status: 400 }
+        );
+      }
+      const note = normalizeString(body.cancellationNote);
+      if (normalizedReason === "other" && !note) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "A non-empty cancellation note is required when cancellation reason is 'other'.",
+          },
+          { status: 400 }
+        );
+      }
+      cancellationReason = normalizedReason;
+      cancellationNote = note || null;
+    }
+
+    // Delivery failure audit & reason validation
+    let deliveryFailureReason: string | null = null;
+    let deliveryFailureNote: string | null = null;
+    if (isStatusChange && targetStatus === "delivery_failed") {
+      const normalizedReason = normalizeDeliveryFailureReason(body.deliveryFailureReason);
+      if (!normalizedReason) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "A valid delivery failure reason is required when marking an order as delivery_failed.",
+          },
+          { status: 400 }
+        );
+      }
+      const note = normalizeString(body.deliveryFailureNote);
+      if (normalizedReason === "other" && !note) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "A non-empty note is required when delivery failure reason is 'other'.",
+          },
+          { status: 400 }
+        );
+      }
+      deliveryFailureReason = normalizedReason;
+      deliveryFailureNote = note || null;
+    }
+
+    // Check for same-state status-only request vs same-state with non-status updates
+    const hasPaymentMethodUpdate =
+      body.paymentMethod !== undefined &&
+      normalizeString(body.paymentMethod) !== "" &&
+      normalizeString(body.paymentMethod) !== existing.paymentMethod;
+    const hasPaymentStatusUpdate =
+      body.paymentStatus !== undefined &&
+      normalizeString(body.paymentStatus) !== "" &&
+      normalizeString(body.paymentStatus) !== existing.paymentStatus;
+    const hasPaymentDetailsUpdate = body.paymentDetails !== undefined;
+
+    const hasNonStatusUpdate =
+      hasPaymentMethodUpdate || hasPaymentStatusUpdate || hasPaymentDetailsUpdate;
+
+    if (!isStatusChange && !hasNonStatusUpdate) {
+      return NextResponse.json({
+        success: true,
+        message: "Order updated successfully.",
+        order: mapOrder(existing, { includeAudit: true }),
+      });
+    }
+
     const shouldRestoreProductStock =
-      existing.status !== "cancelled" && nextStatus === "cancelled";
+      isStatusChange && targetStatus === "cancelled";
 
     const updated = await prisma.$transaction(async (tx) => {
+      const updateData: Record<string, unknown> = {
+        status: targetStatus,
+        paymentMethod:
+          normalizeString(body.paymentMethod) || existing.paymentMethod,
+        paymentStatus:
+          normalizeString(body.paymentStatus) || existing.paymentStatus,
+        paymentProvider:
+          body.paymentDetails !== undefined
+            ? normalizeString(body.paymentDetails?.provider) || null
+            : existing.paymentProvider,
+        paymentSenderNumber:
+          body.paymentDetails !== undefined
+            ? sanitizePhone(normalizeString(body.paymentDetails?.senderNumber)) ||
+              null
+            : existing.paymentSenderNumber,
+        paymentTrxId:
+          body.paymentDetails !== undefined
+            ? getPaymentTrxId(body) || null
+            : existing.paymentTrxId,
+      };
+
+      if (isStatusChange && targetStatus === "cancelled") {
+        updateData.cancelledBy = "admin";
+        updateData.cancellationReason = cancellationReason;
+        updateData.cancellationNote = cancellationNote;
+        updateData.cancelledAt = new Date();
+      } else if (isStatusChange && targetStatus === "delivery_failed") {
+        updateData.deliveryFailureReason = deliveryFailureReason;
+        updateData.deliveryFailureNote = deliveryFailureNote;
+        updateData.deliveryFailedAt = new Date();
+      }
+
       const orderUpdate = await tx.order.update({
         where: { id: existing.id },
-        data: {
-          status: nextStatus,
-          paymentMethod: normalizeString(body.paymentMethod) || existing.paymentMethod,
-          paymentStatus: normalizeString(body.paymentStatus) || existing.paymentStatus,
-          paymentProvider:
-            body.paymentDetails !== undefined
-              ? normalizeString(body.paymentDetails?.provider) || null
-              : existing.paymentProvider,
-          paymentSenderNumber:
-            body.paymentDetails !== undefined
-              ? sanitizePhone(normalizeString(body.paymentDetails?.senderNumber)) || null
-              : existing.paymentSenderNumber,
-          paymentTrxId:
-            body.paymentDetails !== undefined
-              ? getPaymentTrxId(body) || null
-              : existing.paymentTrxId,
-        },
+        data: updateData,
         include: { items: true },
       });
 
@@ -582,7 +772,7 @@ export async function PUT(req: NextRequest) {
       message: shouldRestoreProductStock
         ? "Order cancelled and product stock restored."
         : "Order updated successfully.",
-      order: mapOrder(updated),
+      order: mapOrder(updated, { includeAudit: true }),
     });
   } catch (error) {
     console.error("PUT /api/orders failed:", error);

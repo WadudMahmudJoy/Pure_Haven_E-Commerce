@@ -58,12 +58,19 @@ model Order {
   status              String      @default("pending")
   paymentMethod       String      @default("Cash on Delivery")
   paymentStatus       String      @default("pending")
-  paymentProvider     String?
-  paymentSenderNumber String?
-  paymentTrxId        String?
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
-  items               OrderItem[]
+  paymentProvider       String?
+  paymentSenderNumber   String?
+  paymentTrxId          String?
+  cancelledBy           String?
+  cancellationReason    String?
+  cancellationNote      String?
+  cancelledAt           DateTime?
+  deliveryFailureReason String?
+  deliveryFailureNote   String?
+  deliveryFailedAt      DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  items                 OrderItem[]
 }
 
 model OrderItem {
