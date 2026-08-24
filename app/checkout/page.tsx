@@ -173,7 +173,11 @@ export default function CheckoutPage() {
 
       const orderId = data?.order?.orderId || data?.orderId || data?.order?.id || data?.id || "";
       clearCart();
-      router.push(orderId ? `/order-success?orderId=${encodeURIComponent(orderId)}&paymentMethod=${encodeURIComponent(form.paymentMethod)}` : "/order-success");
+      router.push(
+        orderId
+          ? `/order-success?orderId=${encodeURIComponent(orderId)}&paymentMethod=${encodeURIComponent(form.paymentMethod)}&phone=${encodeURIComponent(form.phone.trim())}&total=${encodeURIComponent(grandTotal)}`
+          : "/order-success"
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to place order.");
     } finally {
