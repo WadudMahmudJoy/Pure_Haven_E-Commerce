@@ -168,7 +168,9 @@ function mapOrder(
   },
   options: MapOrderOptions = {}
 ) {
-  const mapped = {
+  const isPublic = !options.includeAudit;
+
+  const mapped: Record<string, unknown> = {
     id: order.id,
     orderId: order.orderId,
     customer: {
@@ -196,36 +198,38 @@ function mapOrder(
     status: order.status,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
-    paymentDetails:
-      order.paymentProvider ||
-      order.paymentSenderNumber ||
-      order.paymentTrxId
-        ? {
-            provider: order.paymentProvider || undefined,
-            senderNumber: order.paymentSenderNumber || undefined,
-            trxId: order.paymentTrxId || undefined,
-          }
-        : null,
+    paymentDetails: isPublic
+      ? order.paymentProvider
+        ? { provider: order.paymentProvider }
+        : null
+      : order.paymentProvider ||
+        order.paymentSenderNumber ||
+        order.paymentTrxId
+      ? {
+          provider: order.paymentProvider || undefined,
+          senderNumber: order.paymentSenderNumber || undefined,
+          trxId: order.paymentTrxId || undefined,
+        }
+      : null,
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
   };
 
-  if (!options.includeAudit) {
-    return mapped;
+  if (!isPublic) {
+    mapped.paymentSenderNumber = order.paymentSenderNumber ?? null;
+    mapped.paymentTrxId = order.paymentTrxId ?? null;
+    mapped.cancelledBy = order.cancelledBy ?? null;
+    mapped.cancellationReason = order.cancellationReason ?? null;
+    mapped.cancellationNote = order.cancellationNote ?? null;
+    mapped.cancelledAt = order.cancelledAt ? order.cancelledAt.toISOString() : null;
+    mapped.deliveryFailureReason = order.deliveryFailureReason ?? null;
+    mapped.deliveryFailureNote = order.deliveryFailureNote ?? null;
+    mapped.deliveryFailedAt = order.deliveryFailedAt
+      ? order.deliveryFailedAt.toISOString()
+      : null;
   }
 
-  return {
-    ...mapped,
-    cancelledBy: order.cancelledBy ?? null,
-    cancellationReason: order.cancellationReason ?? null,
-    cancellationNote: order.cancellationNote ?? null,
-    cancelledAt: order.cancelledAt ? order.cancelledAt.toISOString() : null,
-    deliveryFailureReason: order.deliveryFailureReason ?? null,
-    deliveryFailureNote: order.deliveryFailureNote ?? null,
-    deliveryFailedAt: order.deliveryFailedAt
-      ? order.deliveryFailedAt.toISOString()
-      : null,
-  };
+  return mapped;
 }
 
 function getCustomerName(body: OrderBody) {
@@ -661,7 +665,7 @@ export async function PUT(req: NextRequest) {
       where: {
         OR: [{ id }, { orderId: id }],
       },
-      include: { items: true },
+      include: { items: true, paymentRecord: true },
     });
 
     if (!existing) {
@@ -713,6 +717,36 @@ export async function PUT(req: NextRequest) {
     }
 
     const isStatusChange = !transitionCheck.noop;
+
+    // Prepaid Confirmation Gate: bKash/Nagad must be PAID before confirming
+    if (isStatusChange && targetStatus === "confirmed") {
+      const isPrepaid =
+        existing.paymentMethod.toLowerCase().includes("bkash") ||
+        existing.paymentMethod.toLowerCase().includes("nagad") ||
+        Boolean(
+          existing.paymentRecord &&
+            (existing.paymentRecord.method.toLowerCase().includes("bkash") ||
+              existing.paymentRecord.method.toLowerCase().includes("nagad"))
+        );
+
+      if (isPrepaid) {
+        const isPaid =
+          existing.paymentRecord?.state === "PAID" ||
+          existing.paymentStatus?.toLowerCase() === "verified" ||
+          existing.paymentStatus?.toLowerCase() === "paid";
+
+        if (!isPaid) {
+          return NextResponse.json(
+            {
+              success: false,
+              code: "PAYMENT_NOT_PAID",
+              message: "Prepaid orders cannot be confirmed until payment is verified and PAID.",
+            },
+            { status: 409 }
+          );
+        }
+      }
+    }
 
     // Cancellation audit & reason validation
     let cancellationReason: string | null = null;
@@ -863,6 +897,23 @@ export async function PUT(req: NextRequest) {
         } else if (isFulfillment) {
           // Fulfill inventory reservations at courier handoff (SHIPPED)
           await fulfillOrderReservation(tx, existing.id);
+        } else if (targetStatus === "delivered") {
+          // COD delivery collection
+          const isCod =
+            existing.paymentMethod.toLowerCase().includes("cash") ||
+            existing.paymentMethod.toLowerCase().includes("delivery");
+
+          if (isCod && existing.paymentRecord) {
+            await tx.paymentRecord.update({
+              where: { id: existing.paymentRecord.id },
+              data: {
+                state: "PAID",
+                verifiedAt: new Date(),
+                verifiedBy: "courier",
+                codSettlementState: "PENDING",
+              },
+            });
+          }
         }
 
         const orderUpdate = await tx.order.findUnique({
