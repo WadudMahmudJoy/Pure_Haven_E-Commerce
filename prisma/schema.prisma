@@ -8,33 +8,33 @@ datasource db {
 }
 
 model Product {
-  id          Int              @id @default(autoincrement())
-  name        String
-  price       Float
+  id             Int              @id @default(autoincrement())
+  name           String
+  price          Float
   compareAtPrice Float?
-  image       String
-  category    String
-  subcategory String?
-  description String?
-  stock       Int              @default(0)
-  isHotDeal   Boolean @default(false)
-  isUpcoming  Boolean @default(false)
-  badgeText   String?
-  badgeTone   String  @default("sale")
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  variants    ProductVariant[]
+  image          String
+  category       String
+  subcategory    String?
+  description    String?
+  stock          Int              @default(0)
+  isHotDeal      Boolean          @default(false)
+  isUpcoming     Boolean          @default(false)
+  badgeText      String?
+  badgeTone      String           @default("sale")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  variants       ProductVariant[]
 }
 
 model ProductVariant {
-  id        Int      @id @default(autoincrement())
+  id        Int     @id @default(autoincrement())
   productId Int
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  label     String
-  price     Float
-  stock     Int      @default(0)
-  image     String?
+  label String
+  price Float
+  stock Int     @default(0)
+  image String?
 
   isHotDeal  Boolean @default(false)
   isUpcoming Boolean @default(false)
@@ -46,18 +46,19 @@ model ProductVariant {
 }
 
 model Order {
-  id                  String      @id @default(cuid())
-  orderId             String      @unique
-  customerName        String
-  customerPhone       String
-  customerCity        String
-  customerAddress     String
-  subtotal            Float
-  deliveryFee         Float
-  total               Float
-  status              String      @default("pending")
-  paymentMethod       String      @default("Cash on Delivery")
-  paymentStatus       String      @default("pending")
+  id                    String         @id @default(cuid())
+  orderId               String         @unique
+  submissionToken       String?        @unique
+  customerName          String
+  customerPhone         String
+  customerCity          String
+  customerAddress       String
+  subtotal              Float
+  deliveryFee           Float
+  total                 Float
+  status                String         @default("pending")
+  paymentMethod         String         @default("Cash on Delivery")
+  paymentStatus         String         @default("pending")
   paymentProvider       String?
   paymentSenderNumber   String?
   paymentTrxId          String?
@@ -68,9 +69,10 @@ model Order {
   deliveryFailureReason String?
   deliveryFailureNote   String?
   deliveryFailedAt      DateTime?
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
   items                 OrderItem[]
+  paymentRecord         PaymentRecord?
 }
 
 model OrderItem {
@@ -86,8 +88,109 @@ model OrderItem {
   category       String
   quantity       Int
 
-  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order       Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reservation InventoryReservation?
+  returnItems ReturnItem[]
 }
+
+model InventoryReservation {
+  id                 Int       @id @default(autoincrement())
+  orderItemId        Int       @unique
+  orderId            String
+  productId          Int
+  variantId          Int?
+  quantity           Int
+  status             String // RESERVED | RELEASED | FULFILLED
+  reservedAt         DateTime  @default(now())
+  evidenceDeadlineAt DateTime?
+  releasedAt         DateTime?
+  releaseReason      String? // CANCELLED | EVIDENCE_DEADLINE_EXPIRED | REJECTED_PAYMENT | ADMIN_OVERRIDE
+  fulfilledAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([variantId])
+  @@index([status])
+}
+
+model PaymentRecord {
+  id            Int       @id @default(autoincrement())
+  orderId       String    @unique
+  method        String // Cash on Delivery | bKash | Nagad
+  state         String // AWAITING_PAYMENT | VERIFICATION_PENDING | PAID | REJECTED | FAILED | REFUND_REQUIRED | REFUND_PROCESSING | REFUNDED
+  provider      String? // bKash | Nagad
+  verifiedAt    DateTime?
+  verifiedBy    String?
+  rejectionNote String?
+
+  // Refund Metadata (State truth is PaymentRecord.state)
+  refundAmount       Float?
+  refundRequiredAt   DateTime?
+  refundProcessingAt DateTime?
+  refundedAt         DateTime?
+  refundNote         String?
+
+  // COD Settlement Domain (Independent Lifecycle)
+  codSettlementState String? // NOT_APPLICABLE | PENDING | SETTLED | DISPUTED
+  codSettledAt       DateTime?
+  codSettlementNote  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order            Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  evidenceAttempts PaymentEvidenceAttempt[]
+
+  @@index([state])
+  @@index([codSettlementState])
+}
+
+model PaymentEvidenceAttempt {
+  id                 Int       @id @default(autoincrement())
+  paymentRecordId    Int
+  normalizedProvider String // bKash | Nagad (normalized uppercase)
+  senderNumber       String
+  trxId              String
+  normalizedTrxId    String // Uppercase, trimmed
+  submittedAt        DateTime  @default(now())
+  state              String // PENDING_REVIEW | ACCEPTED | REJECTED | FAILED
+  verifiedAt         DateTime?
+  verifiedBy         String?
+  rejectionNote      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  paymentRecord PaymentRecord @relation(fields: [paymentRecordId], references: [id], onDelete: Cascade)
+
+  @@index([paymentRecordId])
+  @@index([normalizedProvider, normalizedTrxId])
+}
+
+model ReturnItem {
+  id               Int       @id @default(autoincrement())
+  orderId          String
+  orderItemId      Int
+  productId        Int?
+  variantId        Int?
+  quantity         Int
+  disposition      String // PENDING_INSPECTION | RESTOCKABLE | NON_RESTOCKABLE | DAMAGED
+  physicalReturnAt DateTime?
+  restockedAt      DateTime?
+  adminNote        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([disposition])
+}
+
 model Category {
   id            Int           @id @default(autoincrement())
   name          String
@@ -110,10 +213,11 @@ model Subcategory {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, slug])
 }
+
 model HomeSlide {
   id         Int      @id @default(autoincrement())
   eyebrow    String   @default("PURE HAVEN BD")
