@@ -13,7 +13,7 @@
  *   npx tsx --test tests/catalog-safety.test.ts
  */
 
-import { test } from "node:test";
+import { describe, it, afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -41,7 +41,8 @@ function makeAdminRequest(url: string, method: string, body?: unknown): NextRequ
   return req;
 }
 
-test("Task 9 — DELETE /api/orders Fails Closed with HTTP 409 ORDER_DELETE_FORBIDDEN", async () => {
+describe("Catalog Safety Suite", { concurrency: false }, () => {
+it("Task 9 — DELETE /api/orders Fails Closed with HTTP 409 ORDER_DELETE_FORBIDDEN", async () => {
   const req = makeAdminRequest("http://localhost:3000/api/orders?id=order_1", "DELETE");
   const res = await DELETE_ORDER(req);
   const data = await res.json();
@@ -52,9 +53,9 @@ test("Task 9 — DELETE /api/orders Fails Closed with HTTP 409 ORDER_DELETE_FORB
   assert.match(data.message, /forbidden/i);
 });
 
-test("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB Stock", async () => {
+it("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB Stock", async () => {
+  const updatedVariantsData: any[] = [];
   let updatedProductData: any = null;
-  let updatedVariantData: any = null;
 
   const originalProductFindUnique = prisma.product.findUnique;
   const original$transaction = prisma.$transaction;
@@ -66,46 +67,33 @@ test("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite D
 
   (prisma.product.findUnique as any) = async () => ({
     id: 10,
-    name: "Original Lipstick",
+    name: "Lipstick",
     price: 500,
-    compareAtPrice: 600,
-    image: "/original.png",
+    image: "/lip.png",
     category: "Lips",
-    stock: 25, // Current live DB stock
+    stock: 25,
     variants: [
-      {
-        id: 101,
-        productId: 10,
-        label: "Ruby Red",
-        price: 500,
-        stock: 25, // Current live DB stock
-        image: "/ruby.png",
-      },
+      { id: 101, productId: 10, label: "Red", price: 500, stock: 15 },
+      { id: 102, productId: 10, label: "Pink", price: 500, stock: 10 },
     ],
   });
 
   (prisma.$transaction as any) = async (callback: any) => {
     const mockTx: any = {
       productVariant: {
-        findMany: async () => [{ id: 101, productId: 10, label: "Ruby Red", stock: 25 }],
+        findMany: async () => [
+          { id: 101, productId: 10, label: "Red", price: 500, stock: 15 },
+          { id: 102, productId: 10, label: "Pink", price: 500, stock: 10 },
+        ],
         update: async (args: any) => {
-          updatedVariantData = args;
-          return { id: args.where.id, ...args.data, stock: 25 };
+          updatedVariantsData.push(args);
+          return { id: args.where.id, ...args.data, stock: 15 };
         },
-        create: async (args: any) => ({ id: 102, ...args.data }),
-      },
-      inventoryReservation: {
-        count: async () => 0,
       },
       product: {
         update: async (args: any) => {
           updatedProductData = args;
-          return {
-            id: 10,
-            ...args.data,
-            stock: 25,
-            variants: [{ id: 101, productId: 10, label: "Ruby Red V2", price: 550, stock: 25 }],
-          };
+          return { id: 10, ...args.data };
         },
       },
     };
@@ -116,17 +104,12 @@ test("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite D
     id: 10,
     name: "Updated Lipstick",
     price: 550,
-    image: "/updated.png",
+    image: "/lip-updated.png",
     category: "Lips",
-    stock: 999, // Stale client value: MUST BE IGNORED
+    stock: 999, // Stale client stock snapshot (should be ignored!)
     variants: [
-      {
-        id: 101, // Existing variant ID preserved
-        label: "Ruby Red V2",
-        price: 550,
-        stock: 888, // Stale client value: MUST BE IGNORED
-        image: "/ruby2.png",
-      },
+      { id: 101, label: "Ruby Red", price: 550, stock: 999 }, // Stale client variant stock
+      { id: 102, label: "Pink", price: 500, stock: 999 },
     ],
   });
 
@@ -135,19 +118,18 @@ test("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite D
 
   assert.strictEqual(res.status, 200);
   assert.strictEqual(data.success, true);
-
-  // Verify variant was updated, NOT deleted/recreated with deleteMany
-  assert.ok(updatedVariantData, "Existing variant must be updated");
-  assert.strictEqual(updatedVariantData.where.id, 101);
-  assert.strictEqual(updatedVariantData.data.label, "Ruby Red V2");
-  assert.strictEqual(updatedVariantData.data.price, 550);
+  // Variant ID 101 was updated in-place
+  const variant101Update = updatedVariantsData.find((v) => v.where.id === 101);
+  assert.ok(variant101Update, "Variant 101 must be updated");
+  assert.strictEqual(variant101Update.data.label, "Ruby Red");
+  assert.strictEqual(variant101Update.data.price, 550);
   // Live stock was NOT written from stale client payload
-  assert.strictEqual(updatedVariantData.data.stock, undefined, "Variant update must not overwrite stock");
+  assert.strictEqual(variant101Update.data.stock, undefined, "Variant update must not overwrite stock");
   assert.notStrictEqual(updatedProductData.data.stock, 999, "Client-supplied stock 999 must be ignored");
   assert.strictEqual(updatedProductData.data.stock, 25, "Product aggregate must match live DB variants sum (25)");
 });
 
-test("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reservation", async () => {
+it("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reservation", async () => {
   const originalProductFindUnique = prisma.product.findUnique;
   const original$transaction = prisma.$transaction;
 
@@ -180,7 +162,10 @@ test("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reserv
       inventoryReservation: {
         count: async (args: any) => {
           // Variant 102 has active reservation
-          if (args.where.variantId === 102 && args.where.status === "RESERVED") {
+          if (
+            args.where.variantId === 102 &&
+            (args.where.status === "RESERVED" || args.where.status?.in?.includes("RESERVED"))
+          ) {
             return 1;
           }
           return 0;
@@ -211,7 +196,7 @@ test("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reserv
   assert.strictEqual(data.code, "VARIANT_RESERVED_ACTIVE");
 });
 
-test("Task 9 — PATCH /api/products Performs Explicit Stock Adjustment and Adjusts Aggregate", async () => {
+it("Task 9 — PATCH /api/products Performs Explicit Stock Adjustment and Adjusts Aggregate", async () => {
   let updatedVariantStock: number | null = null;
   let aggregateIncrement: number | null = null;
 
@@ -267,7 +252,7 @@ test("Task 9 — PATCH /api/products Performs Explicit Stock Adjustment and Adju
   assert.strictEqual(aggregateIncrement, 3, "Product aggregate must increment by delta (+3)");
 });
 
-test("Task 9 — DELETE /api/products Blocks Deletion of Product with Active Reservation", async () => {
+it("Task 9 — DELETE /api/products Blocks Deletion of Product with Active Reservation", async () => {
   const originalProductFindUnique = prisma.product.findUnique;
   const originalReservationCount = prisma.inventoryReservation.count;
 
@@ -282,7 +267,10 @@ test("Task 9 — DELETE /api/products Blocks Deletion of Product with Active Res
   });
 
   (prisma.inventoryReservation.count as any) = async (args: any) => {
-    if (args.where.productId === 10 && args.where.status === "RESERVED") {
+    if (
+      args.where.productId === 10 &&
+      (args.where.status === "RESERVED" || args.where.status?.in?.includes("RESERVED"))
+    ) {
       return 2; // 2 active reservations
     }
     return 0;
@@ -297,7 +285,150 @@ test("Task 9 — DELETE /api/products Blocks Deletion of Product with Active Res
   assert.strictEqual(data.code, "PRODUCT_RESERVED_ACTIVE");
 });
 
-test("Task 9 — POST /api/products Normalizes Prices and Rejects Non-Finite Prices", async () => {
+it("Task 9 — DELETE /api/products Blocks Deletion of Product with FULFILLED Reservation", async () => {
+  const originalProductFindUnique = prisma.product.findUnique;
+  const originalReservationCount = prisma.inventoryReservation.count;
+
+  test.after(() => {
+    prisma.product.findUnique = originalProductFindUnique;
+    prisma.inventoryReservation.count = originalReservationCount;
+  });
+
+  (prisma.product.findUnique as any) = async () => ({
+    id: 20,
+    name: "Toner",
+  });
+
+  (prisma.inventoryReservation.count as any) = async (args: any) => {
+    // Has FULFILLED reservation
+    if (
+      args.where.productId === 20 &&
+      args.where.status?.in &&
+      args.where.status.in.includes("FULFILLED")
+    ) {
+      return 1;
+    }
+    return 0;
+  };
+
+  const req = makeAdminRequest("http://localhost:3000/api/products?id=20", "DELETE");
+  const res = await DELETE_PRODUCT(req);
+  const data = await res.json();
+
+  assert.strictEqual(res.status, 409, "Product with FULFILLED reservations must block deletion");
+  assert.strictEqual(data.success, false);
+});
+
+it("Task 9 — PUT /api/products Blocks Deletion of Variant with FULFILLED Reservation", async () => {
+  const originalProductFindUnique = prisma.product.findUnique;
+  const original$transaction = prisma.$transaction;
+
+  test.after(() => {
+    prisma.product.findUnique = originalProductFindUnique;
+    prisma.$transaction = original$transaction;
+  });
+
+  (prisma.product.findUnique as any) = async () => ({
+    id: 30,
+    name: "Serum",
+    price: 600,
+    image: "/serum.png",
+    category: "Skincare",
+    stock: 10,
+    variants: [
+      { id: 301, productId: 30, label: "30ml", price: 600, stock: 5 },
+      { id: 302, productId: 30, label: "50ml", price: 900, stock: 5 },
+    ],
+  });
+
+  (prisma.$transaction as any) = async (callback: any) => {
+    const mockTx: any = {
+      productVariant: {
+        findMany: async () => [
+          { id: 301, productId: 30, label: "30ml", stock: 5 },
+          { id: 302, productId: 30, label: "50ml", stock: 5 },
+        ],
+      },
+      inventoryReservation: {
+        count: async (args: any) => {
+          // Variant 302 has FULFILLED reservation
+          if (
+            args.where.variantId === 302 &&
+            args.where.status?.in &&
+            args.where.status.in.includes("FULFILLED")
+          ) {
+            return 1;
+          }
+          return 0;
+        },
+      },
+    };
+    return await callback(mockTx);
+  };
+
+  // Omits variant 302
+  const req = makeAdminRequest("http://localhost:3000/api/products", "PUT", {
+    id: 30,
+    name: "Serum",
+    price: 600,
+    image: "/serum.png",
+    category: "Skincare",
+    variants: [
+      { id: 301, label: "30ml", price: 600 },
+    ],
+  });
+
+  const res = await PUT_PRODUCT(req);
+  const data = await res.json();
+
+  assert.strictEqual(res.status, 409, "Variant with FULFILLED reservations must block deletion");
+  assert.strictEqual(data.success, false);
+});
+
+it("Task 9 — DELETE /api/products Permits Deletion When Only RELEASED Reservations Exist", async () => {
+  const originalProductFindUnique = prisma.product.findUnique;
+  const originalReservationCount = prisma.inventoryReservation.count;
+  const originalProductDelete = prisma.product.delete;
+
+  test.after(() => {
+    prisma.product.findUnique = originalProductFindUnique;
+    prisma.inventoryReservation.count = originalReservationCount;
+    prisma.product.delete = originalProductDelete;
+  });
+
+  let deleteCalled = false;
+  (prisma.product.findUnique as any) = async () => ({
+    id: 40,
+    name: "Archived Cleanser",
+  });
+
+  (prisma.inventoryReservation.count as any) = async (args: any) => {
+    // No RESERVED or FULFILLED reservations
+    if (
+      args.where.productId === 40 &&
+      args.where.status?.in &&
+      (args.where.status.in.includes("RESERVED") || args.where.status.in.includes("FULFILLED"))
+    ) {
+      return 0;
+    }
+    return 5; // Has RELEASED reservations
+  };
+
+  (prisma.product.delete as any) = async () => {
+    deleteCalled = true;
+    return { id: 40 };
+  };
+
+  const req = makeAdminRequest("http://localhost:3000/api/products?id=40", "DELETE");
+  const res = await DELETE_PRODUCT(req);
+  const data = await res.json();
+
+  assert.strictEqual(res.status, 200, "Product with ONLY RELEASED reservations should be deletable");
+  assert.strictEqual(data.success, true);
+  assert.strictEqual(deleteCalled, true);
+});
+
+it("Task 9 — POST /api/products Normalizes Prices and Rejects Non-Finite Prices", async () => {
   const originalProductCreate = prisma.product.create;
   test.after(() => {
     prisma.product.create = originalProductCreate;
@@ -339,4 +470,5 @@ test("Task 9 — POST /api/products Normalizes Prices and Rejects Non-Finite Pri
 
   const resInvalid = await POST_PRODUCT(reqInvalid);
   assert.strictEqual(resInvalid.status, 400);
+});
 });

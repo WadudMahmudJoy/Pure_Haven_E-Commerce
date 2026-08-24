@@ -258,10 +258,12 @@ export async function PUT(req: Request) {
       // Check omitted variants for active inventory reservations before deleting
       for (const ev of existing.variants) {
         if (!submittedVariantIds.has(ev.id)) {
+          // Check for active or return-bearing fulfilled reservations
+          // Wave E Note: Unresolved ReturnItem rows in Wave E will build on this exact catalog identity retention.
           const activeReservationCount = await tx.inventoryReservation.count({
             where: {
               variantId: ev.id,
-              status: "RESERVED",
+              status: { in: ["RESERVED", "FULFILLED"] },
             },
           });
 
@@ -467,10 +469,12 @@ export async function DELETE(req: Request) {
       );
     }
 
+    // Check for active or return-bearing fulfilled reservations
+    // Wave E Note: Unresolved ReturnItem rows in Wave E will build on this exact catalog identity retention.
     const activeReservationCount = await prisma.inventoryReservation.count({
       where: {
         productId: id,
-        status: "RESERVED",
+        status: { in: ["RESERVED", "FULFILLED"] },
       },
     });
 
@@ -479,7 +483,7 @@ export async function DELETE(req: Request) {
         {
           success: false,
           code: "PRODUCT_RESERVED_ACTIVE",
-          message: "Cannot delete product with active inventory reservations.",
+          message: "Cannot delete product with active or fulfilled inventory reservations.",
         },
         { status: 409 }
       );
