@@ -161,3 +161,159 @@ export async function reserveOrderInventory(
 
   return createdReservations;
 }
+
+export type ReleaseReservationOptions = {
+  releaseReason?: string;
+  releasedAt?: Date;
+};
+
+export type ReleaseReservationResult = {
+  releasedCount: number;
+};
+
+/**
+ * Exactly-once cancellation release and variant stock restoration.
+ * Only the caller that atomically transitions a reservation from RESERVED -> RELEASED (count === 1)
+ * owns the stock restoration entitlement.
+ */
+export async function releaseOrderReservation(
+  tx: DbClient,
+  orderId: string,
+  options?: ReleaseReservationOptions
+): Promise<ReleaseReservationResult> {
+  const now = options?.releasedAt ?? new Date();
+  const reason = options?.releaseReason ?? "ORDER_CANCELLED";
+
+  const reservations = await tx.inventoryReservation.findMany({
+    where: {
+      orderId,
+      status: "RESERVED",
+    },
+  });
+
+  let releasedCount = 0;
+
+  if (reservations.length > 0) {
+    for (const res of reservations) {
+      // Exactly-once DB entitlement claim: only count === 1 owns the restoration!
+      const updateResult = await tx.inventoryReservation.updateMany({
+        where: {
+          id: res.id,
+          status: "RESERVED",
+        },
+        data: {
+          status: "RELEASED",
+          releasedAt: now,
+          releaseReason: reason,
+        },
+      });
+
+      if (updateResult.count === 1) {
+        releasedCount++;
+
+        if (res.variantId) {
+          // Exact variant restoration
+          const variant = await tx.productVariant.findUnique({
+            where: { id: res.variantId },
+          });
+
+          if (!variant || variant.productId !== res.productId) {
+            throw new InventoryIntegrityError(
+              `Cannot restore stock for variant ID ${res.variantId}: exact variant no longer exists in catalog`
+            );
+          }
+
+          await tx.productVariant.update({
+            where: { id: res.variantId },
+            data: { stock: { increment: res.quantity } },
+          });
+
+          await tx.product.update({
+            where: { id: res.productId },
+            data: { stock: { increment: res.quantity } },
+          });
+        } else {
+          // Non-variant restoration
+          await tx.product.update({
+            where: { id: res.productId },
+            data: { stock: { increment: res.quantity } },
+          });
+        }
+      }
+    }
+  } else {
+    // Legacy order compatibility: if order has no modern InventoryReservation rows, check OrderItem rows
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (order && order.items && order.items.length > 0) {
+      for (const item of order.items) {
+        if (!item.productId) continue;
+
+        if (item.variantId) {
+          const variant = await tx.productVariant.findUnique({
+            where: { id: item.variantId },
+          });
+
+          if (!variant || variant.productId !== item.productId) {
+            throw new InventoryIntegrityError(
+              `Cannot restore legacy stock for variant ID ${item.variantId}: exact variant no longer exists in catalog`
+            );
+          }
+
+          await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { stock: { increment: item.quantity } },
+          });
+
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+        } else {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+        }
+      }
+    }
+  }
+
+  return { releasedCount };
+}
+
+export type FulfillReservationOptions = {
+  fulfilledAt?: Date;
+};
+
+export type FulfillReservationResult = {
+  fulfilledCount: number;
+};
+
+/**
+ * Fulfills inventory reservations upon courier handoff (SHIPPED).
+ * Moves status from RESERVED -> FULFILLED without changing sellable stock.
+ */
+export async function fulfillOrderReservation(
+  tx: DbClient,
+  orderId: string,
+  options?: FulfillReservationOptions
+): Promise<FulfillReservationResult> {
+  const now = options?.fulfilledAt ?? new Date();
+
+  const updateResult = await tx.inventoryReservation.updateMany({
+    where: {
+      orderId,
+      status: "RESERVED",
+    },
+    data: {
+      status: "FULFILLED",
+      fulfilledAt: now,
+    },
+  });
+
+  return { fulfilledCount: updateResult.count };
+}

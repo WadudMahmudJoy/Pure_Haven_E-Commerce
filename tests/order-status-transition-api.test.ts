@@ -169,6 +169,7 @@ function stubPrismaForOrders(
     capture.transactionCalled = true;
     const fakeTx = {
       order: {
+        findUnique: async () => orderToReturn,
         update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
           capture.orderUpdateArgs.push(args);
           return {
@@ -184,6 +185,14 @@ function stubPrismaForOrders(
           capture.productUpdateArgs.push(args);
           return { id: args.where.id, stock: 100 };
         },
+      },
+      productVariant: {
+        findUnique: async () => null,
+        update: async () => ({}),
+      },
+      inventoryReservation: {
+        findMany: async () => [],
+        updateMany: async () => ({ count: 0 }),
       },
     };
     return fn(fakeTx);

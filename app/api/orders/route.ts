@@ -27,6 +27,8 @@ import {
 } from "@/lib/orderIdentifiers";
 import {
   reserveOrderInventory,
+  releaseOrderReservation,
+  fulfillOrderReservation,
   InventoryConflictError,
   InventoryIntegrityError,
 } from "@/lib/inventoryService";
@@ -793,8 +795,8 @@ export async function PUT(req: NextRequest) {
       });
     }
 
-    const shouldRestoreProductStock =
-      isStatusChange && targetStatus === "cancelled";
+    const isCancellation = isStatusChange && targetStatus === "cancelled";
+    const isFulfillment = isStatusChange && targetStatus === "shipped";
 
     const updated = await prisma.$transaction(async (tx) => {
       const updateData: Record<string, unknown> = {
@@ -818,7 +820,7 @@ export async function PUT(req: NextRequest) {
             : existing.paymentTrxId,
       };
 
-      if (isStatusChange && targetStatus === "cancelled") {
+      if (isCancellation) {
         updateData.cancelledBy = "admin";
         updateData.cancellationReason = cancellationReason;
         updateData.cancellationNote = cancellationNote;
@@ -835,29 +837,26 @@ export async function PUT(req: NextRequest) {
         include: { items: true },
       });
 
-      if (shouldRestoreProductStock) {
-        for (const item of existing.items) {
-          if (!item.productId) continue;
-
-          await tx.product.update({
-            where: { id: item.productId },
-            data: {
-              stock: { increment: item.quantity },
-            },
-          });
-        }
+      if (isCancellation) {
+        // Exactly-once cancellation release and variant/aggregate stock restoration
+        await releaseOrderReservation(tx, existing.id, {
+          releaseReason: cancellationReason ?? "ORDER_CANCELLED",
+        });
+      } else if (isFulfillment) {
+        // Fulfill inventory reservations at courier handoff (SHIPPED)
+        await fulfillOrderReservation(tx, existing.id);
       }
 
       return orderUpdate;
     });
 
-    if (shouldRestoreProductStock) {
+    if (isCancellation) {
       invalidateProductReadCache();
     }
 
     return NextResponse.json({
       success: true,
-      message: shouldRestoreProductStock
+      message: isCancellation
         ? "Order cancelled and product stock restored."
         : "Order updated successfully.",
       order: mapOrder(updated, { includeAudit: true }),
@@ -865,7 +864,10 @@ export async function PUT(req: NextRequest) {
   } catch (error) {
     console.error("PUT /api/orders failed:", error);
     return NextResponse.json(
-      { success: false, message: "Failed to update order." },
+      {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to update order.",
+      },
       { status: 500 }
     );
   }
@@ -875,42 +877,13 @@ export async function DELETE(req: NextRequest) {
   const unauthorized = requireAdmin(req);
   if (unauthorized) return unauthorized;
 
-  try {
-    const id = req.nextUrl.searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json(
-        { success: false, message: "Order ID is required." },
-        { status: 400 }
-      );
-    }
-
-    const existing = await prisma.order.findFirst({
-      where: {
-        OR: [{ id }, { orderId: id }],
-      },
-    });
-
-    if (!existing) {
-      return NextResponse.json(
-        { success: false, message: "Order not found." },
-        { status: 404 }
-      );
-    }
-
-    await prisma.order.delete({
-      where: { id: existing.id },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: "Order deleted successfully.",
-    });
-  } catch (error) {
-    console.error("DELETE /api/orders failed:", error);
-    return NextResponse.json(
-      { success: false, message: "Failed to delete order." },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(
+    {
+      success: false,
+      code: "ORDER_DELETE_FORBIDDEN",
+      message:
+        "Order deletion is forbidden. Use lifecycle cancellation or return flow instead.",
+    },
+    { status: 409 }
+  );
 }
