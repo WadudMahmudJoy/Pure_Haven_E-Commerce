@@ -70,6 +70,16 @@ function makeFakeTx(capture: TestCapture) {
     product: {
       findUnique: async () => FAKE_PRODUCT,
       update: async () => ({ id: SYNTHETIC_PRODUCT_ID, stock: 999 }),
+      updateMany: async () => ({ count: 1 }),
+    },
+    productVariant: {
+      updateMany: async () => ({ count: 1 }),
+    },
+    inventoryReservation: {
+      create: async (args: Record<string, unknown>) => args.data,
+    },
+    paymentRecord: {
+      create: async (args: Record<string, unknown>) => args.data,
     },
     order: {
       create: async (args: { data: Record<string, unknown> }) => {

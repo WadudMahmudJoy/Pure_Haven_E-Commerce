@@ -14,6 +14,22 @@ import {
   normalizeDeliveryFailureReason,
   validateOrderTransition,
 } from "@/lib/orderLifecycle";
+import {
+  DEFAULT_DELIVERY_FEE,
+  PREPAID_EVIDENCE_DEADLINE_MINUTES,
+} from "@/lib/commerceConstants";
+import {
+  calculateOrderTotals,
+  requireNonNegativeMoney,
+} from "@/lib/money";
+import {
+  withOrderIdRetry,
+} from "@/lib/orderIdentifiers";
+import {
+  reserveOrderInventory,
+  InventoryConflictError,
+  InventoryIntegrityError,
+} from "@/lib/inventoryService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +49,7 @@ type OrderItemInput = {
 
 type OrderBody = {
   id?: string;
+  submissionToken?: string;
   customer?: {
     name?: string;
     phone?: string;
@@ -88,17 +105,19 @@ function sanitizePhone(value: string) {
   return String(value || "").replace(/\D/g, "");
 }
 
-function generateOrderId() {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const random = Math.floor(1000 + Math.random() * 9000);
-  return `PH-${yyyy}${mm}${dd}-${random}`;
-}
+function isSubmissionTokenUniqueCollision(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { code?: string; meta?: { target?: string[] | string } };
+  if (err.code !== "P2002") return false;
 
-function moneyNumber(value: number) {
-  return Number(Number(value || 0).toFixed(2));
+  const target = err.meta?.target;
+  if (Array.isArray(target)) {
+    return target.includes("submissionToken");
+  }
+  if (typeof target === "string") {
+    return target.includes("submissionToken");
+  }
+  return false;
 }
 
 type MapOrderOptions = {
@@ -349,6 +368,22 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as OrderBody;
+    const submissionToken = normalizeString(body.submissionToken) || null;
+
+    // Fast-path idempotency check before opening transaction
+    if (submissionToken) {
+      const existing = await prisma.order.findUnique({
+        where: { submissionToken },
+        include: { items: true },
+      });
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          message: "Order resolved via submission token.",
+          order: mapOrder(existing, { includeAudit: false }),
+        });
+      }
+    }
 
     const customerName = getCustomerName(body);
     const customerPhone = getCustomerPhone(body);
@@ -405,133 +440,141 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const paymentStatus =
-      paymentMethod === "bKash" || paymentMethod === "Nagad"
-        ? "verification_pending"
-        : "pending";
+    const isPrepaid = paymentMethod === "bKash" || paymentMethod === "Nagad";
+    const paymentStatus = isPrepaid ? "awaiting_payment" : "pending";
 
-    const deliveryFee = 120;
-    const orderId = generateOrderId();
-
-    const order = await prisma.$transaction(
-      async (tx) => {
-        const preparedItems = [];
-
-        for (const item of clientItems) {
-          if (!item.productId) {
-            throw new Error("Invalid product id.");
+    const order = await withOrderIdRetry(async (orderId) => {
+      return await prisma.$transaction(
+        async (tx) => {
+          // Idempotency check inside transaction
+          if (submissionToken) {
+            const existing = await tx.order.findUnique({
+              where: { submissionToken },
+              include: { items: true },
+            });
+            if (existing) {
+              return existing;
+            }
           }
 
-          const product = await tx.product.findUnique({
-            where: { id: item.productId },
-            include: { variants: true },
-          });
+          const preparedItems = [];
 
-          if (!product) {
-            throw new Error("One product is no longer available.");
-          }
+          for (const item of clientItems) {
+            if (!item.productId) {
+              throw new Error("Invalid product id.");
+            }
 
-          let itemName = product.name;
-          let itemPrice = product.price;
-          let itemImage = product.image;
-          let availableStock = product.stock;
+            const product = await tx.product.findUnique({
+              where: { id: item.productId },
+              include: { variants: true },
+            });
 
-          const variant = item.variantId
-            ? product.variants.find((entry) => entry.id === item.variantId)
-            : null;
+            if (!product) {
+              throw new Error("One product is no longer available.");
+            }
 
-          if (item.variantId && !variant) {
-            throw new Error(`${product.name} selected variant is no longer available.`);
-          }
+            const variant = item.variantId
+              ? product.variants.find((entry) => entry.id === item.variantId)
+              : null;
 
-          if (variant) {
-            itemName = `${product.name} (${variant.label})`;
-            itemPrice = variant.price;
-            itemImage = variant.image || product.image;
-            availableStock = variant.stock;
-          }
+            if (item.variantId && !variant) {
+              throw new Error(`${product.name} selected variant is no longer available.`);
+            }
 
-          if (availableStock < item.quantity) {
-            throw new Error(
-              `${itemName} has only ${availableStock} item${availableStock === 1 ? "" : "s"} available.`
-            );
-          }
+            const itemName = variant ? `${product.name} (${variant.label})` : product.name;
+            const itemPrice = variant ? variant.price : product.price;
+            const itemImage = (variant && variant.image) || product.image || "/uploads/placeholder-product.png";
 
-          preparedItems.push({
-            productId: product.id,
-            name: itemName,
-            price: moneyNumber(itemPrice),
-            image: itemImage || "/uploads/placeholder-product.png",
-            category: product.category || "Uncategorized",
-            quantity: item.quantity,
-            variantId: variant ? variant.id : null,
-            variantLabel: variant ? variant.label : null,
-          });
-        }
-
-        const subtotal = moneyNumber(
-          preparedItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
-        );
-        const total = moneyNumber(subtotal + deliveryFee);
-
-        const createdOrder = await tx.order.create({
-          data: {
-            orderId,
-            customerName,
-            customerPhone,
-            customerCity,
-            customerAddress,
-            subtotal,
-            deliveryFee,
-            total,
-            status: "pending",
-            paymentMethod,
-            paymentStatus,
-            paymentProvider: normalizeString(body.paymentDetails?.provider) || null,
-            paymentSenderNumber:
-              sanitizePhone(
-                normalizeString(body.paymentDetails?.senderNumber) ||
-                  normalizeString(body.senderNumber)
-              ) || null,
-            paymentTrxId: getPaymentTrxId(body) || null,
-            items: {
-              create: preparedItems.map((item) => ({
-                productId: item.productId,
-                variantId: item.variantId,
-                variantLabel: item.variantLabel,
-                name: item.name,
-                price: item.price,
-                image: item.image,
-                category: item.category,
-                quantity: item.quantity,
-              })),
-            },
-          },
-          include: { items: true },
-        });
-
-        for (const item of preparedItems) {
-          await tx.product.update({
-            where: { id: item.productId },
-            data: {
-              stock: { decrement: item.quantity },
-            },
-          });
-
-          if (item.variantId) {
-            await tx.productVariant.update({
-              where: { id: item.variantId },
-              data: {
-                stock: { decrement: item.quantity },
-              },
+            preparedItems.push({
+              productId: product.id,
+              name: itemName,
+              price: requireNonNegativeMoney(itemPrice, "Item price"),
+              image: itemImage,
+              category: product.category || "Uncategorized",
+              quantity: item.quantity,
+              variantId: variant ? variant.id : null,
+              variantLabel: variant ? variant.label : null,
             });
           }
-        }
 
-        return createdOrder;
-      },
-      { maxWait: 20000, timeout: 60000 }
-    );
+          const { subtotal, deliveryFee, total } = calculateOrderTotals(
+            preparedItems,
+            DEFAULT_DELIVERY_FEE
+          );
+
+          const reservationTimestamp = new Date();
+          const evidenceDeadlineAt = isPrepaid
+            ? new Date(
+                reservationTimestamp.getTime() +
+                  PREPAID_EVIDENCE_DEADLINE_MINUTES * 60 * 1000
+              )
+            : null;
+
+          const createdOrder = await tx.order.create({
+            data: {
+              orderId,
+              submissionToken,
+              customerName,
+              customerPhone,
+              customerCity,
+              customerAddress,
+              subtotal,
+              deliveryFee,
+              total,
+              status: "pending",
+              paymentMethod,
+              paymentStatus,
+              paymentProvider: isPrepaid ? paymentMethod : null,
+              paymentSenderNumber: null,
+              paymentTrxId: null,
+              items: {
+                create: preparedItems.map((item) => ({
+                  productId: item.productId,
+                  variantId: item.variantId,
+                  variantLabel: item.variantLabel,
+                  name: item.name,
+                  price: item.price,
+                  image: item.image,
+                  category: item.category,
+                  quantity: item.quantity,
+                })),
+              },
+            },
+            include: { items: true },
+          });
+
+          // Guarded stock reservation & InventoryReservation row creation
+          await reserveOrderInventory(
+            tx,
+            createdOrder.items.map((item) => ({
+              id: item.id,
+              orderId: createdOrder.id,
+              productId: item.productId!,
+              variantId: item.variantId,
+              quantity: item.quantity,
+            })),
+            {
+              evidenceDeadlineAt,
+              reservationTimestamp,
+            }
+          );
+
+          // Create initial PaymentRecord
+          await tx.paymentRecord.create({
+            data: {
+              orderId: createdOrder.id,
+              method: paymentMethod,
+              state: "AWAITING_PAYMENT",
+              provider: isPrepaid ? paymentMethod : null,
+              codSettlementState: isPrepaid ? null : "NOT_APPLICABLE",
+            },
+          });
+
+          return createdOrder;
+        },
+        { maxWait: 20000, timeout: 60000 }
+      );
+    });
 
     invalidateProductReadCache();
 
@@ -541,6 +584,51 @@ export async function POST(req: NextRequest) {
       order: mapOrder(order, { includeAudit: false }),
     });
   } catch (error) {
+    if (error instanceof InventoryConflictError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INSUFFICIENT_STOCK",
+          message: error.message,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (error instanceof InventoryIntegrityError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVENTORY_INTEGRITY_ERROR",
+          message: "Inventory reservation could not be verified. Please try again.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (isSubmissionTokenUniqueCollision(error)) {
+      // Attempt recovery by finding order by submissionToken
+      try {
+        const body = (await req.json().catch(() => null)) as OrderBody | null;
+        const token = body?.submissionToken ? normalizeString(body.submissionToken) : null;
+        if (token) {
+          const existing = await prisma.order.findUnique({
+            where: { submissionToken: token },
+            include: { items: true },
+          });
+          if (existing) {
+            return NextResponse.json({
+              success: true,
+              message: "Order resolved via submission token.",
+              order: mapOrder(existing, { includeAudit: false }),
+            });
+          }
+        }
+      } catch {
+        // Fall through to general error response
+      }
+    }
+
     console.error("POST /api/orders failed:", error);
     return NextResponse.json(
       {

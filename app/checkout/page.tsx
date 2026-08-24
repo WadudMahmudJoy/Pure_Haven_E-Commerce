@@ -1,6 +1,6 @@
-﻿"use client";
+"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useCart } from "@/components/cart/CartContext";
@@ -33,9 +33,16 @@ export default function CheckoutPage() {
 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const submissionTokenRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!submissionTokenRef.current && typeof crypto !== "undefined" && crypto.randomUUID) {
+      submissionTokenRef.current = crypto.randomUUID();
+    }
+  }, []);
 
   const subtotal = useMemo(() => {
-    return cartItems.reduce((sum, item: any) => {
+    return cartItems.reduce((sum: number, item: any) => {
       const qty = Number(item.quantity || 1);
       const price = Number(item.price || 0);
       return sum + qty * price;
@@ -72,13 +79,8 @@ export default function CheckoutPage() {
         throw new Error("Your cart is empty.");
       }
 
-      if (
-        isManualMobilePayment &&
-        (!form.senderNumber.trim() || !form.transactionId.trim())
-      ) {
-        throw new Error(
-          "Sender number and transaction ID are required for bKash/Nagad payment."
-        );
+      if (!submissionTokenRef.current && typeof crypto !== "undefined" && crypto.randomUUID) {
+        submissionTokenRef.current = crypto.randomUUID();
       }
 
       const orderItems = cartItems.map((item: any) => {
@@ -107,6 +109,7 @@ export default function CheckoutPage() {
       });
 
       const payload = {
+        submissionToken: submissionTokenRef.current || undefined,
         // direct fields
         customerName: form.name.trim(),
         name: form.name.trim(),
@@ -128,7 +131,7 @@ export default function CheckoutPage() {
         },
 
         paymentMethod: form.paymentMethod,
-        paymentStatus: isManualMobilePayment ? "verification_pending" : "pending",
+        paymentStatus: isManualMobilePayment ? "awaiting_payment" : "pending",
         senderNumber: form.senderNumber,
         transactionId: form.transactionId,
         paymentDetails: isManualMobilePayment
@@ -163,8 +166,13 @@ export default function CheckoutPage() {
         throw new Error(data?.message || "Failed to place order.");
       }
 
+      // Rotate submission token for subsequent new checkout intent
+      if (typeof crypto !== "undefined" && crypto.randomUUID) {
+        submissionTokenRef.current = crypto.randomUUID();
+      }
+
       const orderId = data?.order?.orderId || data?.orderId || data?.order?.id || data?.id || "";
-    clearCart();
+      clearCart();
       router.push(orderId ? `/order-success?orderId=${encodeURIComponent(orderId)}&paymentMethod=${encodeURIComponent(form.paymentMethod)}` : "/order-success");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to place order.");
@@ -236,33 +244,14 @@ export default function CheckoutPage() {
               {isManualMobilePayment ? (
                 <div className="rounded-2xl border border-[#ead9d1] bg-[#fffaf7] p-5">
                   <p className="text-sm font-semibold text-[#2e221d]">
-                    {selectedMobileProvider} Manual Payment Verification
+                    {selectedMobileProvider} Payment Reservation
                   </p>
 
                   <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    Pay the order amount through {selectedMobileProvider}, then enter
-                    the sender number and transaction ID below for admin verification.
+                    Your order items will be reserved immediately upon placing the order.
+                    You will have 15 minutes to complete payment via {selectedMobileProvider} and
+                    submit your transaction details.
                   </p>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <input
-                      name="senderNumber"
-                      value={form.senderNumber}
-                      onChange={handleChange}
-                      placeholder={`${selectedMobileProvider} sender number`}
-                      className="rounded-2xl border border-[#ead9d1] px-4 py-3 outline-none"
-                      required
-                    />
-
-                    <input
-                      name="transactionId"
-                      value={form.transactionId}
-                      onChange={handleChange}
-                      placeholder="Transaction ID"
-                      className="rounded-2xl border border-[#ead9d1] px-4 py-3 outline-none"
-                      required
-                    />
-                  </div>
                 </div>
               ) : null}
 

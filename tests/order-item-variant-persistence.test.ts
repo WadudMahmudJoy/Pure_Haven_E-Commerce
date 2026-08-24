@@ -126,6 +126,13 @@ function makeFakeTx(
         });
         return { id: args.where.id, stock: 99 };
       },
+      updateMany: async (args: { where: { id: number }; data: { stock: { decrement: number } } }) => {
+        capture.productUpdates.push({
+          id: args.where.id,
+          decrement: args.data.stock.decrement,
+        });
+        return { count: 1 };
+      },
     },
     productVariant: {
       update: async (args: { where: { id: number }; data: { stock: { decrement: number } } }) => {
@@ -135,6 +142,19 @@ function makeFakeTx(
         });
         return { id: args.where.id, stock: 9 };
       },
+      updateMany: async (args: { where: { id: number }; data: { stock: { decrement: number } } }) => {
+        capture.variantUpdates.push({
+          id: args.where.id,
+          decrement: args.data.stock.decrement,
+        });
+        return { count: 1 };
+      },
+    },
+    inventoryReservation: {
+      create: async (args: Record<string, unknown>) => args.data,
+    },
+    paymentRecord: {
+      create: async (args: Record<string, unknown>) => args.data,
     },
     order: {
       create: async (args: { data: Record<string, unknown>; include?: unknown }) => {

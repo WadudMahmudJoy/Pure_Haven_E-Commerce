@@ -131,6 +131,16 @@ function makeFakeTx(capture: TestCapture) {
         capture.productUpdateCalled = true;
         return { id: SYNTHETIC_PRODUCT_ID, stock: 98 };
       },
+      updateMany: async () => {
+        capture.productUpdateCalled = true;
+        return { count: 1 };
+      },
+    },
+    inventoryReservation: {
+      create: async (args: Record<string, unknown>) => args.data,
+    },
+    paymentRecord: {
+      create: async (args: Record<string, unknown>) => args.data,
     },
     order: {
       create: async (args: { data: Record<string, unknown>; include?: unknown }) => {
@@ -156,6 +166,7 @@ function makeFakeTx(capture: TestCapture) {
             "the test payload must not trigger the variant path."
         );
       },
+      updateMany: async () => ({ count: 1 }),
     },
   };
 }
@@ -251,7 +262,7 @@ test("CASE 1 — COD cannot self-verify: stored paymentStatus must be 'pending'"
   }
 });
 
-test("CASE 2 — bKash cannot self-verify: stored paymentStatus must be 'verification_pending'", async () => {
+test("CASE 2 — bKash cannot self-verify: stored paymentStatus must be 'awaiting_payment'", async () => {
   const capture = freshCapture();
   const fakeTx = makeFakeTx(capture);
   const restoreTransaction = stubTransaction(capture, fakeTx);
@@ -269,8 +280,8 @@ test("CASE 2 — bKash cannot self-verify: stored paymentStatus must be 'verific
 
     assert.strictEqual(
       capture.orderCreateData?.paymentStatus,
-      "verification_pending",
-      `Trust-boundary check: route must persist server-authoritative "verification_pending". ` +
+      "awaiting_payment",
+      `Trust-boundary check: route must persist server-authoritative "awaiting_payment". ` +
         `Client-supplied "verified" must be ignored for bKash orders.`
     );
 
@@ -280,7 +291,7 @@ test("CASE 2 — bKash cannot self-verify: stored paymentStatus must be 'verific
   }
 });
 
-test("CASE 3 — Nagad cannot self-select refunded: stored paymentStatus must be 'verification_pending'", async () => {
+test("CASE 3 — Nagad cannot self-select refunded: stored paymentStatus must be 'awaiting_payment'", async () => {
   const capture = freshCapture();
   const fakeTx = makeFakeTx(capture);
   const restoreTransaction = stubTransaction(capture, fakeTx);
@@ -298,8 +309,8 @@ test("CASE 3 — Nagad cannot self-select refunded: stored paymentStatus must be
 
     assert.strictEqual(
       capture.orderCreateData?.paymentStatus,
-      "verification_pending",
-      `Trust-boundary check: route must persist server-authoritative "verification_pending". ` +
+      "awaiting_payment",
+      `Trust-boundary check: route must persist server-authoritative "awaiting_payment". ` +
         `Client-supplied "refunded" must be ignored for Nagad orders.`
     );
 

@@ -20,11 +20,13 @@ export function encodeCrockfordBase32(buffer: Buffer): string {
 
   let value = buffer.readBigUInt64BE(0);
   const chars = new Array<string>(13);
+  const mask = BigInt(31);
+  const shift = BigInt(5);
 
   for (let i = 12; i >= 0; i--) {
-    const remainder = Number(value & 31n);
+    const remainder = Number(value & mask);
     chars[i] = CROCKFORD_ALPHABET[remainder];
-    value >>= 5n;
+    value >>= shift;
   }
 
   return chars.join("");
