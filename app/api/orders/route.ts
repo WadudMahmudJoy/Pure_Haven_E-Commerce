@@ -831,23 +831,59 @@ export async function PUT(req: NextRequest) {
         updateData.deliveryFailedAt = new Date();
       }
 
-      const orderUpdate = await tx.order.update({
-        where: { id: existing.id },
-        data: updateData,
-        include: { items: true },
-      });
-
-      if (isCancellation) {
-        // Exactly-once cancellation release and variant/aggregate stock restoration
-        await releaseOrderReservation(tx, existing.id, {
-          releaseReason: cancellationReason ?? "ORDER_CANCELLED",
+      if (isStatusChange) {
+        // DB-conditional winner guard: exactly one caller claims the transition
+        const claimResult = await tx.order.updateMany({
+          where: {
+            id: existing.id,
+            status: currentStatus,
+          },
+          data: updateData,
         });
-      } else if (isFulfillment) {
-        // Fulfill inventory reservations at courier handoff (SHIPPED)
-        await fulfillOrderReservation(tx, existing.id);
-      }
 
-      return orderUpdate;
+        if (claimResult.count === 0) {
+          // Check current in-transaction status for idempotent replay vs conflicting divergence
+          const currentInTx = await tx.order.findUnique({
+            where: { id: existing.id },
+            include: { items: true },
+          });
+
+          if (currentInTx && normalizeOrderStatus(currentInTx.status) === targetStatus) {
+            return currentInTx;
+          }
+
+          throw new Error("LIFECYCLE_CONFLICT: Order status was updated concurrently. Mutation rejected.");
+        }
+
+        if (isCancellation) {
+          // Exactly-once cancellation release and variant/aggregate stock restoration
+          await releaseOrderReservation(tx, existing.id, {
+            releaseReason: cancellationReason ?? "ORDER_CANCELLED",
+          });
+        } else if (isFulfillment) {
+          // Fulfill inventory reservations at courier handoff (SHIPPED)
+          await fulfillOrderReservation(tx, existing.id);
+        }
+
+        const orderUpdate = await tx.order.findUnique({
+          where: { id: existing.id },
+          include: { items: true },
+        });
+
+        if (!orderUpdate) {
+          throw new Error("Order not found during update.");
+        }
+
+        return orderUpdate;
+      } else {
+        const orderUpdate = await tx.order.update({
+          where: { id: existing.id },
+          data: updateData,
+          include: { items: true },
+        });
+
+        return orderUpdate;
+      }
     });
 
     if (isCancellation) {
@@ -862,6 +898,17 @@ export async function PUT(req: NextRequest) {
       order: mapOrder(updated, { includeAudit: true }),
     });
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("LIFECYCLE_CONFLICT")) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "LIFECYCLE_CONFLICT",
+          message: "Order status was updated concurrently. Mutation rejected.",
+        },
+        { status: 409 }
+      );
+    }
+
     console.error("PUT /api/orders failed:", error);
     return NextResponse.json(
       {

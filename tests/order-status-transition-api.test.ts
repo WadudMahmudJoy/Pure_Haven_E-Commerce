@@ -170,6 +170,13 @@ function stubPrismaForOrders(
     const fakeTx = {
       order: {
         findUnique: async () => orderToReturn,
+        updateMany: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+          capture.orderUpdateArgs.push(args);
+          if (orderToReturn) {
+            Object.assign(orderToReturn, args.data, { updatedAt: new Date() });
+          }
+          return { count: 1 };
+        },
         update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
           capture.orderUpdateArgs.push(args);
           return {
