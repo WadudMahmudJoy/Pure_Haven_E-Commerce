@@ -1,10 +1,4 @@
 import { NextResponse } from "next/server";
-
-function publicCacheHeaders(seconds = 60) {
-  return {
-    "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}`,
-  };
-}
 import { requireAdmin } from "@/lib/adminSession";
 import { prisma } from "@/lib/prisma";
 import {
@@ -14,9 +8,16 @@ import {
   peekCachedProductRowFromList,
 } from "@/lib/catalogRead";
 import { invalidateProductReadCache } from "@/lib/serverReadCache";
+import { normalizeMoney, requireNonNegativeMoney } from "@/lib/money";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function publicCacheHeaders(seconds = 60) {
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}`,
+  };
+}
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -27,19 +28,9 @@ function optionalText(value: unknown) {
   return clean ? clean : null;
 }
 
-function numberValue(value: unknown) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function optionalNumber(value: unknown) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function safeStock(value: unknown) {
   const n = Number(value);
-  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
 function boolValue(value: unknown) {
@@ -56,19 +47,6 @@ function badgeToneValue(value: unknown) {
   return ["sale", "new", "offer", "hot", "festival"].includes(tone)
     ? tone
     : "sale";
-}
-
-function cleanVariants(value: unknown) {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((item: any) => ({
-      label: text(item?.label),
-      price: numberValue(item?.price),
-      stock: safeStock(item?.stock),
-      image: optionalText(item?.image),
-    }))
-    .filter((item) => item.label && item.price > 0);
 }
 
 export async function GET(req: Request) {
@@ -107,17 +85,24 @@ export async function GET(req: Request) {
   }
 }
 
+type RawVariantInput = {
+  id?: unknown;
+  label?: unknown;
+  price?: unknown;
+  stock?: unknown;
+  image?: unknown;
+};
+
 export async function POST(req: Request) {
   const unauthorized = requireAdmin(req);
   if (unauthorized) return unauthorized;
 
   try {
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, unknown>;
 
     const name = text(body.name);
     const image = text(body.image);
     const category = text(body.category);
-    const variants = cleanVariants(body.variants);
 
     if (!name || !image || !category) {
       return NextResponse.json(
@@ -126,19 +111,39 @@ export async function POST(req: Request) {
       );
     }
 
+    const price = requireNonNegativeMoney(body.price, "Product price");
+    const compareAtPrice =
+      body.compareAtPrice !== undefined && body.compareAtPrice !== null && body.compareAtPrice !== ""
+        ? normalizeMoney(body.compareAtPrice, "Compare at price")
+        : null;
+
+    const rawVariants = Array.isArray(body.variants)
+      ? (body.variants as RawVariantInput[])
+      : [];
+    const variants = rawVariants
+      .map((item) => ({
+        label: text(item?.label),
+        price: requireNonNegativeMoney(item?.price, "Variant price"),
+        stock: safeStock(item?.stock),
+        image: optionalText(item?.image),
+      }))
+      .filter((item) => item.label && item.price >= 0);
+
+    const initialStock =
+      variants.length > 0
+        ? variants.reduce((sum, item) => sum + item.stock, 0)
+        : safeStock(body.stock);
+
     const product = await prisma.product.create({
       data: {
         name,
-        price: numberValue(body.price),
-        compareAtPrice: optionalNumber(body.compareAtPrice),
+        price,
+        compareAtPrice,
         image,
         category,
         subcategory: optionalText(body.subcategory),
         description: optionalText(body.description),
-        stock:
-          variants.length > 0
-            ? variants.reduce((sum, item) => sum + item.stock, 0)
-            : safeStock(body.stock),
+        stock: initialStock,
         isHotDeal: boolValue(body.isHotDeal),
         isUpcoming: boolValue(body.isUpcoming),
         badgeText: optionalText(body.badgeText),
@@ -155,8 +160,11 @@ export async function POST(req: Request) {
     console.error("POST /api/products failed:", error);
 
     return NextResponse.json(
-      { success: false, message: "Failed to create product." },
-      { status: 500 }
+      {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to create product.",
+      },
+      { status: 400 }
     );
   }
 }
@@ -176,45 +184,268 @@ export async function PUT(req: Request) {
       );
     }
 
-    const variants = cleanVariants(body.variants);
-
-    const product = await prisma.product.update({
+    const existing = await prisma.product.findUnique({
       where: { id },
-      data: {
-        name: text(body.name),
-        price: numberValue(body.price),
-        compareAtPrice: optionalNumber(body.compareAtPrice),
-        image: text(body.image),
-        category: text(body.category),
-        subcategory: optionalText(body.subcategory),
-        description: optionalText(body.description),
-        stock:
-          variants.length > 0
-            ? variants.reduce((sum, item) => sum + item.stock, 0)
-            : safeStock(body.stock),
-        isHotDeal: boolValue(body.isHotDeal),
-        isUpcoming: boolValue(body.isUpcoming),
-        badgeText: optionalText(body.badgeText),
-        badgeTone: badgeToneValue(body.badgeTone),
-        variants: {
-          deleteMany: {},
-          create: variants,
+      include: { variants: true },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, message: "Product not found." },
+        { status: 404 }
+      );
+    }
+
+    const name = text(body.name);
+    const image = text(body.image);
+    const category = text(body.category);
+
+    if (!name || !image || !category) {
+      return NextResponse.json(
+        { success: false, message: "Name, image, and category are required." },
+        { status: 400 }
+      );
+    }
+
+    const price = requireNonNegativeMoney(body.price, "Product price");
+    const compareAtPrice =
+      body.compareAtPrice !== undefined && body.compareAtPrice !== null && body.compareAtPrice !== ""
+        ? normalizeMoney(body.compareAtPrice, "Compare at price")
+        : null;
+
+    const rawVariants = Array.isArray(body.variants) ? body.variants : [];
+    const existingVariantsMap = new Map(existing.variants.map((v) => [v.id, v]));
+    const submittedVariantIds = new Set<number>();
+
+    const variantsToUpdate: Array<{ id: number; label: string; price: number; image: string | null }> = [];
+    const variantsToCreate: Array<{ label: string; price: number; stock: number; image: string | null }> = [];
+
+    for (const item of rawVariants) {
+      const vLabel = text(item.label);
+      if (!vLabel) continue;
+      const vPrice = requireNonNegativeMoney(item.price, "Variant price");
+      const vImage = optionalText(item.image);
+
+      if (item.id !== undefined && item.id !== null) {
+        const vid = validId(item.id);
+        if (!vid || !existingVariantsMap.has(vid)) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: `Variant ID ${item.id} does not belong to product ID ${id}.`,
+            },
+            { status: 400 }
+          );
+        }
+        submittedVariantIds.add(vid);
+        variantsToUpdate.push({
+          id: vid,
+          label: vLabel,
+          price: vPrice,
+          image: vImage,
+        });
+      } else {
+        variantsToCreate.push({
+          label: vLabel,
+          price: vPrice,
+          stock: safeStock(item.stock),
+          image: vImage,
+        });
+      }
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Check omitted variants for active inventory reservations before deleting
+      for (const ev of existing.variants) {
+        if (!submittedVariantIds.has(ev.id)) {
+          const activeReservationCount = await tx.inventoryReservation.count({
+            where: {
+              variantId: ev.id,
+              status: "RESERVED",
+            },
+          });
+
+          if (activeReservationCount > 0) {
+            throw new Error(`VARIANT_RESERVED_ACTIVE:${ev.id}`);
+          }
+
+          await tx.productVariant.delete({
+            where: { id: ev.id },
+          });
+        }
+      }
+
+      // Update existing variants (preserving their live stock in DB)
+      for (const uv of variantsToUpdate) {
+        await tx.productVariant.update({
+          where: { id: uv.id },
+          data: {
+            label: uv.label,
+            price: uv.price,
+            image: uv.image,
+          },
+        });
+      }
+
+      // Create new variants
+      for (const cv of variantsToCreate) {
+        await tx.productVariant.create({
+          data: {
+            productId: id,
+            label: cv.label,
+            price: cv.price,
+            stock: cv.stock,
+            image: cv.image,
+          },
+        });
+      }
+
+      // Re-query current variants in DB to maintain exact aggregate Product.stock mirror
+      const hasAnyVariants = variantsToUpdate.length > 0 || variantsToCreate.length > 0;
+      let finalProductStock = existing.stock;
+
+      if (hasAnyVariants) {
+        const currentVariants = await tx.productVariant.findMany({
+          where: { productId: id },
+        });
+        finalProductStock = currentVariants.reduce((sum, v) => sum + v.stock, 0);
+      }
+
+      const updatedProduct = await tx.product.update({
+        where: { id },
+        data: {
+          name,
+          price,
+          compareAtPrice,
+          image,
+          category,
+          subcategory: optionalText(body.subcategory),
+          description: optionalText(body.description),
+          stock: hasAnyVariants ? finalProductStock : undefined, // Preserve existing stock if non-variant
+          isHotDeal: boolValue(body.isHotDeal),
+          isUpcoming: boolValue(body.isUpcoming),
+          badgeText: optionalText(body.badgeText),
+          badgeTone: badgeToneValue(body.badgeTone),
         },
-      },
-      include: { variants: { orderBy: { id: "asc" } } },
+        include: { variants: { orderBy: { id: "asc" } } },
+      });
+
+      return updatedProduct;
     });
 
     invalidateProductReadCache();
 
-    return NextResponse.json({ success: true, product }, { headers: publicCacheHeaders() });
+    return NextResponse.json({ success: true, product: result }, { headers: publicCacheHeaders() });
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("VARIANT_RESERVED_ACTIVE:")) {
+      const vid = error.message.split(":")[1];
+      return NextResponse.json(
+        {
+          success: false,
+          code: "VARIANT_RESERVED_ACTIVE",
+          message: `Cannot delete variant ID ${vid} with active inventory reservations.`,
+        },
+        { status: 409 }
+      );
+    }
+
     console.error("PUT /api/products failed:", error);
 
     return NextResponse.json(
       {
         success: false,
-        message:
-          error instanceof Error ? error.message : "Failed to update product.",
+        message: error instanceof Error ? error.message : "Failed to update product.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: Request) {
+  const unauthorized = requireAdmin(req);
+  if (unauthorized) return unauthorized;
+
+  try {
+    const body = await req.json();
+    const id = validId(body.id);
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, message: "Valid product id is required." },
+        { status: 400 }
+      );
+    }
+
+    if (body.stock === undefined || body.stock === null || typeof body.stock !== "number" || body.stock < 0) {
+      return NextResponse.json(
+        { success: false, message: "Stock must be a non-negative integer." },
+        { status: 400 }
+      );
+    }
+
+    const targetStock = safeStock(body.stock);
+    const variantId = body.variantId !== undefined && body.variantId !== null ? validId(body.variantId) : null;
+
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      include: { variants: true },
+    });
+
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, message: "Product not found." },
+        { status: 404 }
+      );
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      if (variantId) {
+        const variant = existing.variants.find((v) => v.id === variantId);
+        if (!variant) {
+          throw new Error("VARIANT_NOT_FOUND");
+        }
+
+        const delta = targetStock - variant.stock;
+
+        await tx.productVariant.update({
+          where: { id: variantId },
+          data: { stock: targetStock },
+        });
+
+        const updatedProduct = await tx.product.update({
+          where: { id },
+          data: { stock: { increment: delta } },
+          include: { variants: { orderBy: { id: "asc" } } },
+        });
+
+        return updatedProduct;
+      } else {
+        const updatedProduct = await tx.product.update({
+          where: { id },
+          data: { stock: targetStock },
+          include: { variants: { orderBy: { id: "asc" } } },
+        });
+
+        return updatedProduct;
+      }
+    });
+
+    invalidateProductReadCache();
+
+    return NextResponse.json({ success: true, product: result });
+  } catch (error) {
+    if (error instanceof Error && error.message === "VARIANT_NOT_FOUND") {
+      return NextResponse.json(
+        { success: false, message: "Variant not found for this product." },
+        { status: 404 }
+      );
+    }
+
+    console.error("PATCH /api/products failed:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to adjust product stock.",
       },
       { status: 500 }
     );
@@ -236,6 +467,24 @@ export async function DELETE(req: Request) {
       );
     }
 
+    const activeReservationCount = await prisma.inventoryReservation.count({
+      where: {
+        productId: id,
+        status: "RESERVED",
+      },
+    });
+
+    if (activeReservationCount > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "PRODUCT_RESERVED_ACTIVE",
+          message: "Cannot delete product with active inventory reservations.",
+        },
+        { status: 409 }
+      );
+    }
+
     await prisma.product.delete({ where: { id } });
     invalidateProductReadCache();
 
@@ -249,4 +498,3 @@ export async function DELETE(req: Request) {
     );
   }
 }
-
