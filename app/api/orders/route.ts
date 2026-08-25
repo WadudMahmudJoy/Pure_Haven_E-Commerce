@@ -914,6 +914,31 @@ export async function PUT(req: NextRequest) {
               },
             });
           }
+        } else if (targetStatus === "return_received") {
+          // Failed Delivery (Undelivered) Return Intake: auto-create ReturnItem in PENDING_INSPECTION with 0 stock increment
+          const now = new Date();
+          const items = existing.items ?? [];
+          if ("returnItem" in tx && tx.returnItem) {
+            for (const item of items) {
+              const existingReturnItem = await tx.returnItem.findFirst({
+                where: { orderItemId: item.id },
+              });
+              if (!existingReturnItem) {
+                await tx.returnItem.create({
+                  data: {
+                    orderId: existing.id,
+                    orderItemId: item.id,
+                    productId: item.productId,
+                    variantId: item.variantId,
+                    quantity: item.quantity,
+                    disposition: "PENDING_INSPECTION",
+                    physicalReturnAt: now,
+                    restockedAt: null, // 0 stock increment on physical intake
+                  },
+                });
+              }
+            }
+          }
         }
 
         const orderUpdate = await tx.order.findUnique({

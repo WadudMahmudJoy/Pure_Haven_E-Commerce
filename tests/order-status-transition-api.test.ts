@@ -201,6 +201,10 @@ function stubPrismaForOrders(
         findMany: async () => [],
         updateMany: async () => ({ count: 0 }),
       },
+      returnItem: {
+        findFirst: async () => null,
+        create: async () => ({}),
+      },
     };
     return fn(fakeTx);
   };
