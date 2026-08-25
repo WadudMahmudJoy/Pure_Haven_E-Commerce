@@ -184,17 +184,20 @@ export async function releaseOrderReservation(
   const now = options?.releasedAt ?? new Date();
   const reason = options?.releaseReason ?? "ORDER_CANCELLED";
 
-  const reservations = await tx.inventoryReservation.findMany({
+  // Query all reservations for this order (both RESERVED and non-RESERVED)
+  const allReservations = await tx.inventoryReservation.findMany({
     where: {
       orderId,
-      status: "RESERVED",
     },
   });
 
   let releasedCount = 0;
 
-  if (reservations.length > 0) {
-    for (const res of reservations) {
+  if (allReservations.length > 0) {
+    // Modern Order: only active RESERVED reservations are eligible for release
+    const reserved = allReservations.filter((r) => r.status === "RESERVED");
+
+    for (const res of reserved) {
       // Exactly-once DB entitlement claim: only count === 1 owns the restoration!
       const updateResult = await tx.inventoryReservation.updateMany({
         where: {
@@ -242,11 +245,12 @@ export async function releaseOrderReservation(
       }
     }
   } else {
-    // Legacy order compatibility: if order has no modern InventoryReservation rows, check OrderItem rows
+    // Legacy order compatibility: only if order has ZERO modern InventoryReservation rows at all
     const order = await tx.order.findUnique({
       where: { id: orderId },
       include: { items: true },
     });
+
 
     if (order && order.items && order.items.length > 0) {
       for (const item of order.items) {

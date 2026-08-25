@@ -12,7 +12,10 @@
  *   - Diagnostics provide only sanitized host category and classification.
  */
 
+import "dotenv/config";
+
 export interface DatabaseSafetyReport {
+
   safe: boolean;
   reason?: string;
   normalHostCategory?: string;
