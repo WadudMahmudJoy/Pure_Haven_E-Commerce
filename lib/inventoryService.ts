@@ -317,3 +317,137 @@ export async function fulfillOrderReservation(
 
   return { fulfilledCount: updateResult.count };
 }
+
+export type RestockReturnItemOptions = {
+  restockedAt?: Date;
+  adminNote?: string;
+};
+
+export type RestockReturnItemResult = {
+  success: boolean;
+  restockedCount: number;
+  idempotent?: boolean;
+  message?: string;
+};
+
+/**
+ * Exactly-once stock restoration for an inspected, RESTOCKABLE ReturnItem.
+ *
+ * Requirements:
+ *   - ReturnItem.physicalReturnAt must not be null (physically received).
+ *   - ReturnItem.disposition must be "RESTOCKABLE".
+ *   - ReturnItem.restockedAt must be null before this call.
+ *
+ * Uses guarded updateMany:
+ *   WHERE id = returnItemId AND physicalReturnAt IS NOT NULL AND disposition = 'RESTOCKABLE' AND restockedAt IS NULL
+ *
+ * Only count === 1 owns the stock increment entitlement.
+ * Repeated calls on an already-restocked item return idempotent success without double incrementing stock.
+ */
+export async function restockReturnItem(
+  tx: DbClient,
+  returnItemId: number,
+  options?: RestockReturnItemOptions
+): Promise<RestockReturnItemResult> {
+  const now = options?.restockedAt ?? new Date();
+
+  const returnItem = await tx.returnItem.findUnique({
+    where: { id: returnItemId },
+  });
+
+  if (!returnItem) {
+    return { success: false, restockedCount: 0, message: "Return item not found" };
+  }
+
+  if (!returnItem.physicalReturnAt) {
+    return {
+      success: false,
+      restockedCount: 0,
+      message: "Cannot restock item that has not been physically received (physicalReturnAt is null)",
+    };
+  }
+
+  if (returnItem.disposition !== "RESTOCKABLE") {
+    return {
+      success: false,
+      restockedCount: 0,
+      message: `Cannot restock item with disposition '${returnItem.disposition}'. Must be 'RESTOCKABLE'`,
+    };
+  }
+
+  // Idempotent check: if already restocked
+  if (returnItem.restockedAt !== null) {
+    return {
+      success: true,
+      restockedCount: 0,
+      idempotent: true,
+      message: "Return item was already restocked",
+    };
+  }
+
+  // Atomic conditional claim: exactly one winner claims restockedAt
+  const claim = await tx.returnItem.updateMany({
+    where: {
+      id: returnItemId,
+      physicalReturnAt: { not: null },
+      disposition: "RESTOCKABLE",
+      restockedAt: null,
+    },
+    data: {
+      restockedAt: now,
+      ...(options?.adminNote ? { adminNote: options.adminNote } : {}),
+    },
+  });
+
+  if (claim.count !== 1) {
+    // Another concurrent process claimed the restock
+    return {
+      success: true,
+      restockedCount: 0,
+      idempotent: true,
+      message: "Return item was already restocked concurrently",
+    };
+  }
+
+  // Exactly-once stock increment
+  const qty = returnItem.quantity;
+
+  if (returnItem.variantId) {
+    if (!returnItem.productId) {
+      throw new InventoryIntegrityError(
+        `Cannot restock return item ${returnItemId}: missing productId for variant ${returnItem.variantId}`
+      );
+    }
+
+    const variant = await tx.productVariant.findUnique({
+      where: { id: returnItem.variantId },
+    });
+
+    if (!variant || variant.productId !== returnItem.productId) {
+      throw new InventoryIntegrityError(
+        `Cannot restock variant ID ${returnItem.variantId}: exact variant no longer exists in catalog`
+      );
+    }
+
+    await tx.productVariant.update({
+      where: { id: returnItem.variantId },
+      data: { stock: { increment: qty } },
+    });
+
+    await tx.product.update({
+      where: { id: returnItem.productId },
+      data: { stock: { increment: qty } },
+    });
+  } else if (returnItem.productId) {
+    await tx.product.update({
+      where: { id: returnItem.productId },
+      data: { stock: { increment: qty } },
+    });
+  } else {
+    throw new InventoryIntegrityError(
+      `Cannot restock return item ${returnItemId}: neither productId nor variantId is present`
+    );
+  }
+
+  return { success: true, restockedCount: 1 };
+}
