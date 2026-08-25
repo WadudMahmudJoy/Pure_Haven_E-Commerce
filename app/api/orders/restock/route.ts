@@ -58,15 +58,27 @@ export async function POST(req: Request) {
         throw new Error("NOT_FOUND: ReturnItem not found.");
       }
 
-      // If disposition update requested, update it first
+      // If disposition update requested, update it conditionally ensuring restockedAt IS NULL
       if (rawDisposition && rawDisposition !== returnItem.disposition) {
-        await tx.returnItem.update({
-          where: { id: returnItemId },
+        if (returnItem.restockedAt !== null) {
+          throw new Error("CONFLICT: Cannot change disposition of an already restocked return item.");
+        }
+
+        const dispClaim = await tx.returnItem.updateMany({
+          where: {
+            id: returnItemId,
+            restockedAt: null,
+          },
           data: {
             disposition: rawDisposition,
             ...(adminNote ? { adminNote } : {}),
           },
         });
+
+        if (dispClaim.count !== 1) {
+          throw new Error("CONFLICT: Cannot change disposition of an already restocked return item.");
+        }
+
         returnItem.disposition = rawDisposition;
       }
 
@@ -99,12 +111,20 @@ export async function POST(req: Request) {
       );
     }
 
+    if (error instanceof Error && error.message.startsWith("CONFLICT:")) {
+      return NextResponse.json(
+        { success: false, message: error.message.replace("CONFLICT:", "").trim() },
+        { status: 409 }
+      );
+    }
+
     if (error instanceof Error && error.message.startsWith("VALIDATION:")) {
       return NextResponse.json(
         { success: false, message: error.message.replace("VALIDATION:", "").trim() },
         { status: 400 }
       );
     }
+
 
     console.error("POST /api/orders/restock error:", error);
     return NextResponse.json(

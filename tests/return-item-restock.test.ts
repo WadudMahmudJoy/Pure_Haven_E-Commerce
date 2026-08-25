@@ -657,5 +657,160 @@ describe("Task 16 — ReturnItem Domain & Inspection Restock", { concurrency: fa
     const res = await POST_RESTOCK(req);
     assert.strictEqual(res.status, 500, "Missing variant must fail closed with error");
   });
+
+  // -------------------------------------------------------------------------
+  // Post-Restock Disposition Immutability & Row Locking Tests
+  // -------------------------------------------------------------------------
+  it("POST-RESTOCK IMMUTABILITY — Attempting to change disposition of already-restocked ReturnItem returns 409 conflict", async (t) => {
+    const originalReturnItemFindUnique = prisma.returnItem.findUnique;
+    const original$transaction = prisma.$transaction;
+
+    t.after(() => {
+      prisma.returnItem.findUnique = originalReturnItemFindUnique;
+      prisma.$transaction = original$transaction;
+    });
+
+    // ReturnItem is ALREADY restocked
+    (prisma.returnItem.findUnique as any) = async () => ({
+      id: 307,
+      orderId: "cuid_order_restocked",
+      orderItemId: 607,
+      productId: 15,
+      variantId: null,
+      quantity: 2,
+      disposition: "RESTOCKABLE",
+      physicalReturnAt: new Date("2026-08-25T10:00:00Z"),
+      restockedAt: new Date("2026-08-25T11:00:00Z"), // Already restocked!
+    });
+
+    let dispositionUpdateCalled = false;
+
+    (prisma.$transaction as any) = async (callback: any) => {
+      const mockTx: any = {
+        returnItem: {
+          findUnique: async () => ({
+            id: 307,
+            productId: 15,
+            variantId: null,
+            quantity: 2,
+            disposition: "RESTOCKABLE",
+            physicalReturnAt: new Date("2026-08-25T10:00:00Z"),
+            restockedAt: new Date("2026-08-25T11:00:00Z"),
+          }),
+          updateMany: async () => {
+            dispositionUpdateCalled = true;
+            return { count: 0 };
+          },
+          update: async () => {
+            dispositionUpdateCalled = true;
+            return {};
+          },
+        },
+      };
+      return await callback(mockTx);
+    };
+
+    // Attempting to change disposition to DAMAGED on an already restocked item
+    const req = makeRestockRequest({
+      returnItemId: 307,
+      disposition: "DAMAGED",
+    });
+
+    const res = await POST_RESTOCK(req);
+    const data = await res.json();
+
+    assert.strictEqual(
+      res.status,
+      409,
+      `Expected 409 conflict when mutating disposition of already-restocked item, got ${res.status}`
+    );
+    assert.strictEqual(data.success, false);
+    assert.strictEqual(
+      dispositionUpdateCalled,
+      false,
+      "Must NOT mutate disposition on an already-restocked item"
+    );
+  });
+
+  it("PARTIAL-RETURN ROW LOCKING — Executes parameterized SELECT ... FOR UPDATE on OrderItem before ReturnItem aggregate", async (t) => {
+    const originalOrderFindFirst = prisma.order.findFirst;
+    const original$transaction = prisma.$transaction;
+
+    t.after(() => {
+      prisma.order.findFirst = originalOrderFindFirst;
+      prisma.$transaction = original$transaction;
+    });
+
+    (prisma.order.findFirst as any) = async () => ({
+      id: "cuid_delivered_lock",
+      orderId: "PH-DELIVERED-LOCK",
+      status: "delivered",
+    });
+
+    let queryRawCalled = false;
+    let queryRawSqlText = "";
+    let orderItemReadAfterLock = false;
+    let createCalledAfterLock = false;
+
+    (prisma.$transaction as any) = async (callback: any) => {
+      const mockTx: any = {
+        $queryRaw: async (query: any) => {
+          queryRawCalled = true;
+          // Inspect raw SQL template or text
+          queryRawSqlText = String(query?.text || query?.strings?.join("?") || query || "");
+          return [{ id: 508 }];
+        },
+        orderItem: {
+          findUnique: async () => {
+            if (queryRawCalled) {
+              orderItemReadAfterLock = true;
+            }
+            return {
+              id: 508,
+              orderId: "cuid_delivered_lock",
+              productId: 10,
+              variantId: null,
+              quantity: 5,
+              returnItems: [{ id: 1, quantity: 2 }],
+            };
+          },
+        },
+        returnItem: {
+          create: async (args: any) => {
+            if (orderItemReadAfterLock) {
+              createCalledAfterLock = true;
+            }
+            return { id: 2, ...args.data };
+          },
+        },
+      };
+      return await callback(mockTx);
+    };
+
+    const req = makeReturnsRequest({
+      orderId: "PH-DELIVERED-LOCK",
+      items: [{ orderItemId: 508, quantity: 2 }],
+    });
+
+    const res = await POST_RETURNS(req);
+    const data = await res.json();
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(data.success, true);
+    assert.strictEqual(
+      queryRawCalled,
+      true,
+      "Must execute SELECT ... FOR UPDATE to lock OrderItem row"
+    );
+    assert.ok(
+      queryRawSqlText.toUpperCase().includes("FOR UPDATE"),
+      `Raw query must contain 'FOR UPDATE', got: ${queryRawSqlText}`
+    );
+    assert.strictEqual(
+      createCalledAfterLock,
+      true,
+      "ReturnItem create must happen strictly after acquiring the OrderItem row lock"
+    );
+  });
 });
 

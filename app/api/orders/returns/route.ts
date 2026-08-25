@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
 import { requireAdmin } from "@/lib/adminSession";
 
 export const runtime = "nodejs";
+
 export const dynamic = "force-dynamic";
 
 const VALID_DISPOSITIONS = [
@@ -99,7 +101,14 @@ export async function POST(req: Request) {
           disposition = upperDisp;
         }
 
-        // Authoritative OrderItem lookup
+        // Acquire exclusive row lock on OrderItem to serialize concurrent partial returns
+        if (typeof tx.$queryRaw === "function") {
+          await tx.$queryRaw(
+            Prisma.sql`SELECT "id" FROM "OrderItem" WHERE "id" = ${orderItemId} FOR UPDATE`
+          );
+        }
+
+        // Authoritative OrderItem lookup after row lock acquisition
         const orderItem = await tx.orderItem.findUnique({
           where: { id: orderItemId },
           include: { returnItems: true },
@@ -108,6 +117,7 @@ export async function POST(req: Request) {
         if (!orderItem || orderItem.orderId !== order.id) {
           throw new Error(`VALIDATION: OrderItem ${orderItemId} does not belong to order ${orderIdRaw}.`);
         }
+
 
         // Cumulative quantity check across all ReturnItem rows for this OrderItem
         const existingReturnedQty = orderItem.returnItems.reduce(
