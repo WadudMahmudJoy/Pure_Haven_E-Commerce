@@ -132,14 +132,9 @@ export async function releaseExpiredReservations(
           return { released: false, count: 0 };
         }
 
-        // Step B: Atomically release reservations and restore stock
-        const releaseResult = await releaseOrderReservation(tx, order.id, {
-          releaseReason: "EVIDENCE_DEADLINE_EXPIRED",
-          releasedAt: now,
-        });
-
-        // Step C: Atomically cancel order
-        await tx.order.updateMany({
+        // Step B: Atomically claim Order cancellation transition
+        // Sits in same transaction: if this fails, PaymentRecord claim rolls back!
+        const orderClaim = await tx.order.updateMany({
           where: {
             id: order.id,
             status: { in: ["pending", "PENDING", "awaiting_payment"] },
@@ -153,8 +148,20 @@ export async function releaseExpiredReservations(
           },
         });
 
+        if (orderClaim.count !== 1) {
+          // Order was concurrently modified to a non-pending state -> abort transaction completely
+          throw new Error("ORDER_CANCELLATION_CLAIM_FAILED");
+        }
+
+        // Step C: Atomically release reservations and restore stock (only after both claims won)
+        const releaseResult = await releaseOrderReservation(tx, order.id, {
+          releaseReason: "EVIDENCE_DEADLINE_EXPIRED",
+          releasedAt: now,
+        });
+
         return { released: true, count: releaseResult.releasedCount };
       });
+
 
       if (result.released) {
         releasedOrderIds.push(order.orderId || order.id);

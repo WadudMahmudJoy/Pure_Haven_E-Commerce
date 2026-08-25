@@ -684,5 +684,92 @@ describe("Task 15 — Prepaid Evidence Expiry Engine", { concurrency: false }, (
     assert.strictEqual(result.releasedCount, 1);
     assert.strictEqual(paymentRecordState, "FAILED", "PaymentRecord must be transitioned to FAILED");
   });
+
+  it("ORDER CLAIM FAILURE — If Order cancellation claim fails (count === 0), expiry transaction aborts with 0 release", async (t) => {
+    const originalReservationFindMany = prisma.inventoryReservation.findMany;
+    const originalOrderFindUnique = prisma.order.findUnique;
+    const original$transaction = prisma.$transaction;
+
+    t.after(() => {
+      prisma.inventoryReservation.findMany = originalReservationFindMany;
+      prisma.order.findUnique = originalOrderFindUnique;
+      prisma.$transaction = original$transaction;
+    });
+
+    const now = new Date("2026-08-25T12:30:00Z");
+    const pastDeadline = new Date("2026-08-25T12:15:00Z");
+
+    (prisma.inventoryReservation.findMany as any) = async () => [
+      {
+        id: 110,
+        orderId: "order_order_claim_fails",
+        orderItemId: 10,
+        productId: 95,
+        variantId: null,
+        quantity: 5,
+        status: "RESERVED",
+        evidenceDeadlineAt: pastDeadline,
+      },
+    ];
+
+    (prisma.order.findUnique as any) = async () => ({
+      id: "order_order_claim_fails",
+      orderId: "PH-ORDER-CLAIM-FAILS",
+      status: "pending",
+      paymentMethod: "bKash",
+      paymentRecord: {
+        id: 510,
+        orderId: "order_order_claim_fails",
+        state: "AWAITING_PAYMENT",
+        method: "bKash",
+      },
+    });
+
+    let stockIncremented = false;
+
+    (prisma.$transaction as any) = async (callback: any) => {
+      const mockTx: any = {
+        paymentRecord: {
+          updateMany: async () => ({ count: 1 }), // Payment claim wins
+        },
+        order: {
+          updateMany: async () => ({ count: 0 }), // Order claim LOSES (concurrent mutation)
+        },
+        inventoryReservation: {
+          findMany: async () => [
+            {
+              id: 110,
+              orderId: "order_order_claim_fails",
+              productId: 95,
+              variantId: null,
+              quantity: 5,
+              status: "RESERVED",
+            },
+          ],
+          updateMany: async () => ({ count: 1 }),
+        },
+        product: {
+          update: async () => {
+            stockIncremented = true;
+          },
+        },
+      };
+      return await callback(mockTx);
+    };
+
+    const result = await releaseExpiredReservations(now);
+
+    assert.strictEqual(
+      result.releasedCount,
+      0,
+      "Must release 0 reservations when Order cancellation claim fails"
+    );
+    assert.deepStrictEqual(result.orderIds, []);
+    assert.strictEqual(
+      stockIncremented,
+      false,
+      "Stock MUST NOT be incremented when order claim fails"
+    );
+  });
 });
 
