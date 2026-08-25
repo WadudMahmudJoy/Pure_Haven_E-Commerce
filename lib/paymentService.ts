@@ -134,8 +134,21 @@ export function mapCanonicalToLegacyStatus(state: PaymentState): string {
   }
 }
 
+/**
+ * Generic payment state transition graph used by the admin payment-status PATCH endpoint.
+ *
+ * IMPORTANT — AWAITING_PAYMENT → PAID is intentionally ABSENT from this map.
+ *
+ * Prepaid (bKash / Nagad) must follow:
+ *   AWAITING_PAYMENT → VERIFICATION_PENDING → PAID
+ * PAID is only reachable via the explicit evidence ACCEPT workflow.
+ *
+ * COD delivery collection (AWAITING_PAYMENT → PAID) is handled by the dedicated
+ * OUT_FOR_DELIVERY → DELIVERED order lifecycle transition in the order route,
+ * NOT through this generic payment transition graph.
+ */
 const ALLOWED_PAYMENT_TRANSITIONS: Record<PaymentState, readonly PaymentState[]> = {
-  AWAITING_PAYMENT: ["VERIFICATION_PENDING", "PAID", "FAILED"],
+  AWAITING_PAYMENT: ["VERIFICATION_PENDING", "FAILED"],
   VERIFICATION_PENDING: ["PAID", "REJECTED", "REFUND_REQUIRED", "FAILED"],
   PAID: ["REFUND_REQUIRED"],
   REJECTED: ["VERIFICATION_PENDING", "REFUND_REQUIRED", "FAILED"],

@@ -1,12 +1,56 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeProvider, normalizeTrxId, sanitizePhone } from "@/lib/paymentService";
+import { consumeRateLimit } from "@/lib/rateLimit";
+import {
+  getRateLimitClientKey,
+} from "@/lib/rateLimitPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// ---------------------------------------------------------------------------
+// Fix #6 — Dedicated rate-limit policy for payment evidence endpoint
+//
+// 10 requests / client IP / 60-second window.
+// This is a public financial mutation endpoint — must be conservative.
+// Denial occurs BEFORE any order lookup, PaymentRecord read, or DB write.
+// ---------------------------------------------------------------------------
+const PAYMENT_EVIDENCE_MAX_REQUESTS_PER_CLIENT = 10;
+const PAYMENT_EVIDENCE_WINDOW_SECONDS = 60;
+
 export async function POST(req: Request) {
   try {
+    // -----------------------------------------------------------------------
+    // Fix #6 — Rate-limit check FIRST, before any DB work
+    // -----------------------------------------------------------------------
+    const clientKey = getRateLimitClientKey(req);
+    const evidenceBucketKey = `payment_evidence:${clientKey}`;
+
+    const rateLimitResult = consumeRateLimit(
+      evidenceBucketKey,
+      PAYMENT_EVIDENCE_MAX_REQUESTS_PER_CLIENT,
+      PAYMENT_EVIDENCE_WINDOW_SECONDS * 1000
+    );
+
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Too many payment evidence submissions. Please try again later.",
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimitResult.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // Parse and validate request payload
+    // -----------------------------------------------------------------------
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
 
     if (!body) {
@@ -62,7 +106,11 @@ export async function POST(req: Request) {
       );
     }
 
+    // -----------------------------------------------------------------------
     // Lookup order with PaymentRecord
+    // Fix #19 — Use generic "not found" if customer authorization fails
+    // to avoid leaking whether the orderId exists
+    // -----------------------------------------------------------------------
     const order = await prisma.order.findFirst({
       where: {
         OR: [
@@ -75,19 +123,12 @@ export async function POST(req: Request) {
       },
     });
 
-    if (!order) {
+    // Authorization check — use same generic message for not-found vs phone mismatch
+    const orderPhone = order ? sanitizePhone(order.customerPhone) : null;
+    if (!order || orderPhone !== sanitizedPhone) {
       return NextResponse.json(
-        { success: false, message: "Order not found." },
+        { success: false, message: "Order not found or customer phone number does not match." },
         { status: 404 }
-      );
-    }
-
-    // Customer authorization check
-    const orderPhone = sanitizePhone(order.customerPhone);
-    if (orderPhone !== sanitizedPhone) {
-      return NextResponse.json(
-        { success: false, message: "Customer phone number does not match this order." },
-        { status: 403 }
       );
     }
 
@@ -155,61 +196,107 @@ export async function POST(req: Request) {
       paymentRecordId = createdRecord.id;
     }
 
-    // Execute submission in transaction with anti-replay and idempotency
+    // -----------------------------------------------------------------------
+    // Fix #1 — PaymentRecord owns evidence submission via conditional claim
+    //
+    // Architecture:
+    //   - First submission: expectedSourceState = AWAITING_PAYMENT
+    //   - Resubmission after rejection: expectedSourceState = REJECTED
+    //
+    // Only the winner (claim.count === 1) creates the PaymentEvidenceAttempt.
+    // Losers re-read the current state inside the SAME transaction and resolve:
+    //   A. VERIFICATION_PENDING + same (provider, trxId) → idempotent 200
+    //   B. VERIFICATION_PENDING + different trxId → 409 EVIDENCE_ALREADY_SUBMITTED
+    //   C. Other incompatible state → payment-state conflict
+    //
+    // Cross-order partial unique index (normalizedProvider, normalizedTrxId)
+    // WHERE state IN ('PENDING_REVIEW','ACCEPTED') remains final anti-replay
+    // authority and is preserved below.
+    // -----------------------------------------------------------------------
+    const currentPrState = order.paymentRecord?.state ?? "AWAITING_PAYMENT";
+    const expectedSourceState: string =
+      currentPrState === "REJECTED" ? "REJECTED" : "AWAITING_PAYMENT";
+
     try {
       const result = await prisma.$transaction(async (tx) => {
-        // Check for active claim on this (provider, trxId)
-        const activeClaim = await tx.paymentEvidenceAttempt.findFirst({
+        // Step 1 — Conditionally claim the PaymentRecord transition
+        const claim = await tx.paymentRecord.updateMany({
           where: {
-            normalizedProvider,
-            normalizedTrxId,
-            state: { in: ["PENDING_REVIEW", "ACCEPTED"] },
+            id: paymentRecordId,
+            state: expectedSourceState,
           },
-        });
-
-        if (activeClaim) {
-          if (activeClaim.paymentRecordId === paymentRecordId) {
-            // Idempotent retry for the same order
-            return { idempotent: true };
-          }
-
-          throw new Error(`PAYMENT_EVIDENCE_ALREADY_CLAIMED:${normalizedProvider}:${normalizedTrxId}`);
-        }
-
-        // Create new attempt
-        const attempt = await tx.paymentEvidenceAttempt.create({
-          data: {
-            paymentRecordId: paymentRecordId!,
-            normalizedProvider,
-            senderNumber: sanitizedSender,
-            trxId: trxIdRaw.trim(),
-            normalizedTrxId,
-            submittedAt: now,
-            state: "PENDING_REVIEW",
-          },
-        });
-
-        // Transition PaymentRecord
-        await tx.paymentRecord.update({
-          where: { id: paymentRecordId },
           data: {
             state: "VERIFICATION_PENDING",
             provider: normalizedProvider,
           },
         });
 
-        // Mirror legacy Order fields
-        await tx.order.update({
-          where: { id: order.id },
-          data: {
-            paymentStatus: "verification_pending",
-            paymentProvider: normalizedProvider,
-            paymentSenderNumber: sanitizedSender,
-            paymentTrxId: trxIdRaw.trim(),
+        if (claim.count === 1) {
+          // ----------------------------------------------------------------
+          // Winner path — create exactly one new PENDING_REVIEW attempt
+          // ----------------------------------------------------------------
+
+          // Cross-order anti-replay: check partial unique index scope
+          // (handled by DB constraint; if it throws P2002, caught below)
+          const attempt = await tx.paymentEvidenceAttempt.create({
+            data: {
+              paymentRecordId: paymentRecordId!,
+              normalizedProvider,
+              senderNumber: sanitizedSender,
+              trxId: trxIdRaw.trim(),
+              normalizedTrxId,
+              submittedAt: now,
+              state: "PENDING_REVIEW",
+            },
+          });
+
+          // Mirror legacy Order fields
+          await tx.order.update({
+            where: { id: order.id },
+            data: {
+              paymentStatus: "verification_pending",
+              paymentProvider: normalizedProvider,
+              paymentSenderNumber: sanitizedSender,
+              paymentTrxId: trxIdRaw.trim(),
+            },
+          });
+
+          return { attempt, idempotent: false };
+        }
+
+        // ----------------------------------------------------------------
+        // Loser path — claim.count === 0
+        // Re-read current PaymentRecord + active evidence inside transaction
+        // ----------------------------------------------------------------
+        const currentPr = await tx.paymentRecord.findUnique({
+          where: { id: paymentRecordId },
+          include: {
+            evidenceAttempts: {
+              where: { state: { in: ["PENDING_REVIEW", "ACCEPTED"] } },
+              orderBy: { submittedAt: "desc" },
+              take: 1,
+            },
           },
         });
 
-        return { attempt, idempotent: false };
+        if (currentPr?.state === "VERIFICATION_PENDING") {
+          const activeAttempt = currentPr.evidenceAttempts[0];
+
+          if (
+            activeAttempt &&
+            activeAttempt.normalizedProvider === normalizedProvider &&
+            activeAttempt.normalizedTrxId === normalizedTrxId
+          ) {
+            // Case A — Same (provider, trxId): idempotent success
+            return { idempotent: true };
+          }
+
+          // Case B — Different (provider, trxId): conflict
+          throw new Error("EVIDENCE_ALREADY_SUBMITTED");
+        }
+
+        // Case C — Incompatible state (e.g. already PAID, or FAILED)
+        throw new Error(`PAYMENT_STATE_CONFLICT:${currentPr?.state ?? "UNKNOWN"}`);
       });
 
       if (result.idempotent) {
@@ -232,21 +319,33 @@ export async function POST(req: Request) {
         },
       });
     } catch (txError) {
-      if (
-        txError instanceof Error &&
-        txError.message.startsWith("PAYMENT_EVIDENCE_ALREADY_CLAIMED")
-      ) {
+      if (txError instanceof Error && txError.message === "EVIDENCE_ALREADY_SUBMITTED") {
         return NextResponse.json(
           {
             success: false,
-            code: "PAYMENT_EVIDENCE_ALREADY_CLAIMED",
-            message: "This transaction ID has already been submitted for another payment.",
+            code: "EVIDENCE_ALREADY_SUBMITTED",
+            message: "This order already has a pending payment evidence submission.",
           },
           { status: 409 }
         );
       }
 
-      // Handle partial unique constraint violation (P2002)
+      if (
+        txError instanceof Error &&
+        txError.message.startsWith("PAYMENT_STATE_CONFLICT")
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "PAYMENT_STATE_CONFLICT",
+            message: "The payment is in a state that does not accept new evidence submissions.",
+          },
+          { status: 409 }
+        );
+      }
+
+      // Handle cross-order partial unique constraint violation (P2002)
+      // IMPORTANT: Use root prisma client (not failed tx client)
       if ((txError as { code?: string })?.code === "P2002") {
         const existingClaim = await prisma.paymentEvidenceAttempt.findFirst({
           where: {
@@ -281,7 +380,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         success: false,
-        message: error instanceof Error ? error.message : "Failed to submit payment evidence.",
+        message: "Failed to submit payment evidence.",
       },
       { status: 500 }
     );

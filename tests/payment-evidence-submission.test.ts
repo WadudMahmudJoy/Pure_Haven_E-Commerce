@@ -68,17 +68,18 @@ describe("Task 11 — Payment Evidence Submission & Anti-Replay", { concurrency:
 
     (prisma.$transaction as any) = async (callback: any) => {
       const mockTx: any = {
+        paymentRecord: {
+          // New Fix #1 architecture: conditional claim via updateMany
+          updateMany: async (args: any) => {
+            updatedPaymentRecord = args.data;
+            return { count: 1 }; // winner
+          },
+          findUnique: async () => null, // not reached on winner path
+        },
         paymentEvidenceAttempt: {
-          findFirst: async () => null,
           create: async (args: any) => {
             createdAttempt = args.data;
             return { id: 101, ...args.data };
-          },
-        },
-        paymentRecord: {
-          update: async (args: any) => {
-            updatedPaymentRecord = args.data;
-            return { id: 50, ...args.data };
           },
         },
         order: {
@@ -192,11 +193,13 @@ describe("Task 11 — Payment Evidence Submission & Anti-Replay", { concurrency:
     const originalOrderFindFirst = prisma.order.findFirst;
     const originalReservationFindMany = prisma.inventoryReservation.findMany;
     const original$transaction = prisma.$transaction;
+    const originalPaymentEvidenceAttemptFindFirst = prisma.paymentEvidenceAttempt.findFirst;
 
     t.after(() => {
       prisma.order.findFirst = originalOrderFindFirst;
       prisma.inventoryReservation.findMany = originalReservationFindMany;
       prisma.$transaction = original$transaction;
+      prisma.paymentEvidenceAttempt.findFirst = originalPaymentEvidenceAttemptFindFirst;
     });
 
     const deadline = new Date(Date.now() + 10 * 60 * 1000);
@@ -219,24 +222,36 @@ describe("Task 11 — Payment Evidence Submission & Anti-Replay", { concurrency:
       { id: 3, orderId: "cuid_order_attacker", status: "RESERVED", evidenceDeadlineAt: deadline },
     ];
 
+    // New architecture: attacker's updateMany(state=AWAITING_PAYMENT) would succeed (count=1),
+    // but then create() throws P2002 (cross-order partial unique index violation).
+    // P2002 handler uses root prisma client to find the existing claim.
     (prisma.$transaction as any) = async (callback: any) => {
       const mockTx: any = {
+        paymentRecord: {
+          updateMany: async () => ({ count: 1 }), // attacker's own claim succeeds
+          findUnique: async () => null,
+        },
         paymentEvidenceAttempt: {
-          findFirst: async (args: any) => {
-            // Already claimed by victim order (paymentRecordId: 50)
-            if (args.where.normalizedProvider === "BKASH" && args.where.normalizedTrxId === "TRX_REPLAYED") {
-              return {
-                id: 1,
-                paymentRecordId: 50, // Different order!
-                state: "PENDING_REVIEW",
-              };
-            }
-            return null;
+          create: async () => {
+            // Simulate P2002 partial unique constraint violation (cross-order replay)
+            const p2002Error = new Error("Unique constraint failed on partial index");
+            (p2002Error as any).code = "P2002";
+            throw p2002Error;
           },
         },
+        order: { update: async () => ({}) },
       };
       return await callback(mockTx);
     };
+
+    // Root prisma check (outside tx) finds the victim's existing claim
+    (prisma.paymentEvidenceAttempt.findFirst as any) = async () => ({
+      id: 1,
+      paymentRecordId: 50, // Victim's order — different from attacker (99)
+      normalizedProvider: "BKASH",
+      normalizedTrxId: "TRX_REPLAYED",
+      state: "PENDING_REVIEW",
+    });
 
     const req = makeEvidenceRequest({
       orderId: "PH-ATTACKER",
@@ -287,19 +302,31 @@ describe("Task 11 — Payment Evidence Submission & Anti-Replay", { concurrency:
 
     (prisma.$transaction as any) = async (callback: any) => {
       const mockTx: any = {
-        paymentEvidenceAttempt: {
-          findFirst: async (args: any) => {
-            // Already claimed by THIS SAME order
-            if (args.where.normalizedProvider === "BKASH" && args.where.normalizedTrxId === "TRX_SAME_RETRY") {
-              return {
+        paymentRecord: {
+          // updateMany returns count=0 because PaymentRecord is already VERIFICATION_PENDING
+          updateMany: async (_args: any) => ({ count: 0 }),
+          // findUnique returns current record with same (provider, trxId) → idempotent
+          findUnique: async (_args: any) => ({
+            id: 77,
+            state: "VERIFICATION_PENDING",
+            provider: "BKASH",
+            evidenceAttempts: [
+              {
                 id: 200,
                 paymentRecordId: 77,
+                normalizedProvider: "BKASH",
+                normalizedTrxId: "TRX_SAME_RETRY", // same TrxId → idempotent
                 state: "PENDING_REVIEW",
-              };
-            }
-            return null;
+              },
+            ],
+          }),
+        },
+        paymentEvidenceAttempt: {
+          create: async () => {
+            throw new Error("MUST NOT create on idempotent path");
           },
         },
+        order: { update: async () => ({}) },
       };
       return await callback(mockTx);
     };

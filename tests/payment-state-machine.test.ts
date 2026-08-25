@@ -56,8 +56,10 @@ describe("Task 10 — Payment State Machine", () => {
   it("TRANSITIONS — Allowed forward payment transitions succeed", () => {
     // Stage 1 -> Stage 2 evidence submitted
     assert.strictEqual(validatePaymentTransition("AWAITING_PAYMENT", "VERIFICATION_PENDING").allowed, true);
-    // COD delivery collection
-    assert.strictEqual(validatePaymentTransition("AWAITING_PAYMENT", "PAID").allowed, true);
+    // AWAITING_PAYMENT → PAID is NOT allowed via the generic transition graph.
+    // COD delivery collection is handled by the explicit OUT_FOR_DELIVERY→DELIVERED
+    // order lifecycle transition in the order route — not via this generic function.
+    assert.strictEqual(validatePaymentTransition("AWAITING_PAYMENT", "PAID").allowed, false);
     // Admin accepts evidence
     assert.strictEqual(validatePaymentTransition("VERIFICATION_PENDING", "PAID").allowed, true);
     // Admin rejects evidence
@@ -90,6 +92,9 @@ describe("Task 10 — Payment State Machine", () => {
     // Terminal REFUNDED has zero forward transitions
     assert.strictEqual(validatePaymentTransition("REFUNDED", "AWAITING_PAYMENT").allowed, false);
     assert.strictEqual(validatePaymentTransition("REFUNDED", "VERIFICATION_PENDING").allowed, false);
+    // Prepaid direct-PAID bypass: AWAITING_PAYMENT → PAID is forbidden in generic transitions
+    // (COD uses a dedicated order route handler, not this function)
+    assert.strictEqual(validatePaymentTransition("AWAITING_PAYMENT", "PAID").allowed, false);
   });
 
   it("COD SETTLEMENT — Valid transitions and forbidden transitions", () => {

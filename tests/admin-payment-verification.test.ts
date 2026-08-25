@@ -92,9 +92,10 @@ describe("Task 12 — Admin Payment Verification & Confirmation Gate", { concurr
           },
         },
         paymentRecord: {
-          update: async (args: any) => {
+          // Fix #7 — now uses conditional updateMany, not unconditional update
+          updateMany: async (args: any) => {
             updatedPaymentRecord = args.data;
-            return { id: 60, ...args.data };
+            return { count: 1 };
           },
         },
         order: {
@@ -161,9 +162,10 @@ describe("Task 12 — Admin Payment Verification & Confirmation Gate", { concurr
           },
         },
         paymentRecord: {
-          update: async (args: any) => {
+          // Fix #7 — conditional claim via updateMany (count=1 to proceed)
+          updateMany: async (args: any) => {
             updatedPaymentRecord = args.data;
-            return { id: 61, ...args.data };
+            return { count: 1 };
           },
         },
         order: {
