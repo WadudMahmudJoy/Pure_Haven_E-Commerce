@@ -39,6 +39,25 @@ export const CUSTOMER_REGISTER_WINDOW_SECONDS = 3600; // 1 hour
 export const CUSTOMER_REGISTER_GLOBAL_MAX_ATTEMPTS = 30;
 export const CUSTOMER_REGISTER_GLOBAL_WINDOW_SECONDS = 3600; // 1 hour
 
+// Customer Password Reset (Per-Client, Per-Target & Process-Global) (Phase 3 Wave D)
+export const CUSTOMER_PASSWORD_RESET_MAX_ATTEMPTS_PER_CLIENT = 3;
+export const CUSTOMER_PASSWORD_RESET_MAX_ATTEMPTS_PER_TARGET = 3;
+export const CUSTOMER_PASSWORD_RESET_WINDOW_SECONDS = 3600; // 1 hour
+export const CUSTOMER_PASSWORD_RESET_GLOBAL_MAX_ATTEMPTS = 30;
+export const CUSTOMER_PASSWORD_RESET_GLOBAL_WINDOW_SECONDS = 3600; // 1 hour
+
+// Customer Email Verification (Per-Client, Per-Target & Process-Global) (Phase 3 Wave D)
+export const CUSTOMER_EMAIL_VERIFICATION_MAX_ATTEMPTS_PER_CLIENT = 3;
+export const CUSTOMER_EMAIL_VERIFICATION_MAX_ATTEMPTS_PER_TARGET = 3;
+export const CUSTOMER_EMAIL_VERIFICATION_WINDOW_SECONDS = 3600; // 1 hour
+export const CUSTOMER_EMAIL_VERIFICATION_GLOBAL_MAX_ATTEMPTS = 30;
+export const CUSTOMER_EMAIL_VERIFICATION_GLOBAL_WINDOW_SECONDS = 3600; // 1 hour
+
+// Customer Sensitive Identity Mutation / Password Re-auth (Phase 3 Wave D)
+export const CUSTOMER_IDENTITY_MUTATION_MAX_ATTEMPTS_PER_CLIENT = 5;
+export const CUSTOMER_IDENTITY_MUTATION_WINDOW_SECONDS = 900; // 15 minutes
+
+
 
 /**
  * Validates and normalizes an IP candidate string using standard Node.js IP parsing.
