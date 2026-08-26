@@ -19,10 +19,6 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function sanitizePhone(value: string) {
-  return String(value || "").replace(/\D/g, "");
-}
-
 function mapOrder(order: {
   id: string;
   orderId: string;
@@ -123,21 +119,18 @@ export async function GET(req: Request) {
     }
 
     const user = sessionResult.user;
-    const phone = sanitizePhone(user.normalizedPhone || "");
 
-    const orders = phone
-      ? await prisma.order.findMany({
-          where: {
-            customerPhone: phone,
-          },
-          include: {
-            items: true,
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-        })
-      : [];
+    const orders = await prisma.order.findMany({
+      where: {
+        userId: user.id,
+      },
+      include: {
+        items: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     return NextResponse.json({
       success: true,
