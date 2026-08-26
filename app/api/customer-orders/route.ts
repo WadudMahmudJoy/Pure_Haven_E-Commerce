@@ -1,49 +1,26 @@
+/**
+ * Customer Orders API Route (Phase 3 Wave B)
+ *
+ * Authenticates exclusively via PostgreSQL-backed CustomerSession (pure_haven_customer_session).
+ * Insecure legacy credentials (pure_haven_customer_auth, customer-users.json) are fail-closed.
+ *
+ * NOTE: Full Order.userId checkout binding and foreign key ownership migration
+ * will be completed in Wave C.
+ */
+
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import path from "path";
 import { prisma } from "@/lib/prisma";
+import {
+  getCustomerSessionTokenFromRequest,
+  validateCustomerSession,
+  clearCustomerSessionCookie,
+} from "@/lib/customerSession";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type CustomerUser = {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  createdAt: string;
-};
-
-const usersFile = path.join(process.cwd(), "data", "customer-users.json");
-const customerCookieName = "pure_haven_customer_auth";
-
 function sanitizePhone(value: string) {
   return String(value || "").replace(/\D/g, "");
-}
-
-function readCookie(req: Request, name: string) {
-  const cookieHeader = req.headers.get("cookie") || "";
-  const cookies = cookieHeader.split(";").map((part) => part.trim());
-
-  for (const cookie of cookies) {
-    const [key, ...valueParts] = cookie.split("=");
-
-    if (key === name) {
-      return decodeURIComponent(valueParts.join("="));
-    }
-  }
-
-  return "";
-}
-
-async function readUsers(): Promise<CustomerUser[]> {
-  try {
-    const raw = await readFile(usersFile, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
 }
 
 function mapOrder(order: {
@@ -123,38 +100,44 @@ function mapOrder(order: {
 
 export async function GET(req: Request) {
   try {
-    const customerId = readCookie(req, customerCookieName);
+    const rawToken = getCustomerSessionTokenFromRequest(req);
 
-    if (!customerId) {
-      return NextResponse.json(
+    if (!rawToken) {
+      const res = NextResponse.json(
         { success: false, authenticated: false, message: "Customer login required." },
         { status: 401 }
       );
+      clearCustomerSessionCookie(res);
+      return res;
     }
 
-    const users = await readUsers();
-    const user = users.find((item) => item.id === customerId);
+    const sessionResult = await validateCustomerSession(rawToken);
 
-    if (!user) {
-      return NextResponse.json(
-        { success: false, authenticated: false, message: "Customer not found." },
+    if (!sessionResult.authenticated || !sessionResult.user) {
+      const res = NextResponse.json(
+        { success: false, authenticated: false, message: "Customer login required." },
         { status: 401 }
       );
+      clearCustomerSessionCookie(res);
+      return res;
     }
 
-    const phone = sanitizePhone(user.phone);
+    const user = sessionResult.user;
+    const phone = sanitizePhone(user.normalizedPhone || "");
 
-    const orders = await prisma.order.findMany({
-      where: {
-        customerPhone: phone,
-      },
-      include: {
-        items: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+    const orders = phone
+      ? await prisma.order.findMany({
+          where: {
+            customerPhone: phone,
+          },
+          include: {
+            items: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+        })
+      : [];
 
     return NextResponse.json({
       success: true,
@@ -163,8 +146,8 @@ export async function GET(req: Request) {
         id: user.id,
         name: user.name,
         email: user.email,
-        phone: user.phone,
-        createdAt: user.createdAt,
+        phone: user.normalizedPhone,
+        createdAt: user.createdAt.toISOString(),
       },
       orders: orders.map(mapOrder),
     });

@@ -555,19 +555,40 @@ test("CASE 6 — Customer order serialization tests production route GET handler
     return FAKE_CUSTOMER_ORDERS;
   };
 
+  const originalSessionFindUnique = prismaAny.customerSession?.findUnique;
+  if (!prismaAny.customerSession) prismaAny.customerSession = {};
+  prismaAny.customerSession.findUnique = async () => ({
+    id: "sess_task21_test",
+    userId: "user_task21_test",
+    tokenHash: "dummyHash",
+    revokedAt: null,
+    expiresAt: new Date(Date.now() + 604800000),
+    user: {
+      id: "user_task21_test",
+      name: "Task 21 Test User",
+      email: "task21@example.invalid",
+      normalizedPhone: "01700000000",
+      emailVerifiedAt: null,
+      phoneVerifiedAt: null,
+      isActive: true,
+      createdAt: new Date("2026-08-18T00:00:00.000Z"),
+      updatedAt: new Date("2026-08-18T00:00:00.000Z"),
+    },
+  });
+
   try {
-    // Switch to temp root so route evaluates usersFile against synthetic temp directory
+    // Switch to temp root so route evaluates in isolated environment
     process.chdir(tempRoot);
 
     const routePath = path.resolve(originalCwd, "app/api/customer-orders/route.ts");
     const routeUrl = pathToFileURL(routePath).href + `?cacheBust=${Date.now()}`;
     const { GET: isolatedCustomerOrdersGET } = await import(routeUrl);
 
-    // Request with valid customer auth cookie pointing to synthetic user in temp directory
+    // Request with valid customer session cookie
     const req = new Request("http://localhost:3000/api/customer-orders", {
       method: "GET",
       headers: {
-        cookie: `pure_haven_customer_auth=${syntheticUser.id}`,
+        cookie: `pure_haven_customer_session=valid_session_token_for_task21_test`,
       },
     });
 
@@ -614,6 +635,9 @@ test("CASE 6 — Customer order serialization tests production route GET handler
   } finally {
     process.chdir(originalCwd);
     prismaAny.order.findMany = originalFindMany;
+    if (prismaAny.customerSession) {
+      prismaAny.customerSession.findUnique = originalSessionFindUnique;
+    }
     await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
 });
