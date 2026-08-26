@@ -15,6 +15,8 @@ type CustomerUser = {
   email?: string | null;
   normalizedPhone?: string | null;
   phone?: string | null;
+  emailVerifiedAt?: string | Date | null;
+  phoneVerifiedAt?: string | Date | null;
   createdAt?: string;
 };
 
@@ -70,6 +72,16 @@ export default function CustomerDashboardClient() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [resendStatus, setResendStatus] = useState("");
+  const [resending, setResending] = useState(false);
+
+  // Identity Mutation State
+  const [showIdentityModal, setShowIdentityModal] = useState<"EMAIL" | "PHONE" | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newIdentifierValue, setNewIdentifierValue] = useState("");
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [identityError, setIdentityError] = useState("");
+  const [identitySuccess, setIdentitySuccess] = useState("");
 
   const [reloadIndex, setReloadIndex] = useState(0);
 
@@ -137,6 +149,88 @@ export default function CustomerDashboardClient() {
     return { totalOrders, delivered, pending, totalSpent };
   }, [orders]);
 
+  async function handleResendVerification() {
+    setResending(true);
+    setResendStatus("");
+    try {
+      const res = await fetch("/api/customer-auth/email-verification/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setResendStatus("Verification link sent! Please check your inbox.");
+      } else {
+        setResendStatus(data?.message || "Failed to send verification link.");
+      }
+    } catch {
+      setResendStatus("Network error. Please try again.");
+    } finally {
+      setResending(false);
+    }
+  }
+
+  async function handleIdentityMutation(e: React.FormEvent) {
+    e.preventDefault();
+    setIdentityLoading(true);
+    setIdentityError("");
+    setIdentitySuccess("");
+
+    const action =
+      showIdentityModal === "EMAIL"
+        ? user?.email
+          ? "CHANGE_EMAIL"
+          : "ADD_EMAIL"
+        : user?.normalizedPhone || user?.phone
+          ? "CHANGE_PHONE"
+          : "ADD_PHONE";
+
+    const payload: {
+      action: "ADD_EMAIL" | "CHANGE_EMAIL" | "ADD_PHONE" | "CHANGE_PHONE";
+      currentPassword: string;
+      newEmail?: string;
+      newPhone?: string;
+    } = {
+      action,
+      currentPassword,
+    };
+
+    if (showIdentityModal === "EMAIL") {
+      payload.newEmail = newIdentifierValue.trim();
+    } else {
+      payload.newPhone = newIdentifierValue.trim();
+    }
+
+    try {
+      const res = await fetch("/api/customer-auth/identity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.success) {
+        setIdentitySuccess(data.message || "Account updated successfully.");
+        setCurrentPassword("");
+        setNewIdentifierValue("");
+        setTimeout(() => {
+          setShowIdentityModal(null);
+          setIdentitySuccess("");
+          loadDashboard();
+        }, 1200);
+      } else {
+        setIdentityError(data?.message || "Update failed. Please try again.");
+      }
+    } catch {
+      setIdentityError("Network error. Please try again.");
+    } finally {
+      setIdentityLoading(false);
+    }
+  }
+
   async function logout() {
     try {
       await fetch("/api/customer-auth/logout", {
@@ -189,6 +283,28 @@ export default function CustomerDashboardClient() {
           </button>
         </nav>
 
+        {/* Non-blocking Phone-Only Recovery Notice */}
+        {!user?.email && (
+          <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-5 text-amber-900 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-sm">Add an email address to enable password recovery.</p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Accounts registered with only a phone number require a verified email to use automated password recovery.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setShowIdentityModal("EMAIL");
+                setIdentityError("");
+                setIdentitySuccess("");
+              }}
+              className="px-4 py-2 rounded-full bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold whitespace-nowrap transition"
+            >
+              Add Email Address
+            </button>
+          </div>
+        )}
+
         <section className="rounded-[30px] border border-[#ead8cf] bg-white p-6 shadow-sm md:p-8">
           <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
             <div>
@@ -198,9 +314,64 @@ export default function CustomerDashboardClient() {
               <h1 className="mt-2 text-3xl font-bold">
                 Welcome{user?.name ? `, ${user.name}` : ""}
               </h1>
-              <p className="mt-2 text-sm text-[#6f5d54]">
-                {user?.email || "No email"} · {user?.normalizedPhone || user?.phone || "No phone"}
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-[#6f5d54]">
+                {/* Email Section */}
+                <div className="flex items-center gap-2">
+                  <span>{user?.email || "No email"}</span>
+                  {user?.email ? (
+                    user.emailVerifiedAt ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                        Verified
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                        Not verified
+                      </span>
+                    )
+                  ) : null}
+                  <button
+                    onClick={() => {
+                      setShowIdentityModal("EMAIL");
+                      setIdentityError("");
+                      setIdentitySuccess("");
+                    }}
+                    className="text-xs text-amber-700 hover:underline font-medium"
+                  >
+                    {user?.email ? "Change" : "Add"}
+                  </button>
+                </div>
+
+                <span>·</span>
+
+                {/* Phone Section */}
+                <div className="flex items-center gap-2">
+                  <span>{user?.normalizedPhone || user?.phone || "No phone"}</span>
+                  <button
+                    onClick={() => {
+                      setShowIdentityModal("PHONE");
+                      setIdentityError("");
+                      setIdentitySuccess("");
+                    }}
+                    className="text-xs text-amber-700 hover:underline font-medium"
+                  >
+                    {user?.normalizedPhone || user?.phone ? "Change" : "Add"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Resend Verification Action if Unverified */}
+              {user?.email && !user.emailVerifiedAt && (
+                <div className="mt-3 flex items-center gap-3">
+                  <button
+                    onClick={handleResendVerification}
+                    disabled={resending}
+                    className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline disabled:opacity-50"
+                  >
+                    {resending ? "Sending verification email..." : "Resend verification link"}
+                  </button>
+                  {resendStatus && <span className="text-xs text-emerald-700">{resendStatus}</span>}
+                </div>
+              )}
             </div>
 
             <Link
@@ -236,6 +407,95 @@ export default function CustomerDashboardClient() {
             </div>
           </div>
         </section>
+
+        {/* Identity Mutation Modal */}
+        {showIdentityModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md bg-white rounded-3xl p-6 md:p-8 shadow-xl border border-[#ead8cf]">
+              <h3 className="text-xl font-bold text-[#2d1f1a]">
+                {showIdentityModal === "EMAIL"
+                  ? user?.email
+                    ? "Change Email Address"
+                    : "Add Email Address"
+                  : user?.normalizedPhone || user?.phone
+                    ? "Change Phone Number"
+                    : "Add Phone Number"}
+              </h3>
+              <p className="text-xs text-[#6f5d54] mt-1.5 mb-5">
+                {showIdentityModal === "EMAIL"
+                  ? "You'll need to verify your new email before it can be used for password recovery."
+                  : "Enter a valid Bangladeshi phone number (e.g. 017XXXXXXXX)."}
+              </p>
+
+              {identityError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 mb-4">
+                  {identityError}
+                </div>
+              )}
+
+              {identitySuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700 mb-4">
+                  {identitySuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleIdentityMutation} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#2d1f1a] mb-1">
+                    {showIdentityModal === "EMAIL" ? "New Email Address" : "New Phone Number"}
+                  </label>
+                  <input
+                    type={showIdentityModal === "EMAIL" ? "email" : "tel"}
+                    required
+                    value={newIdentifierValue}
+                    onChange={(e) => setNewIdentifierValue(e.target.value)}
+                    placeholder={
+                      showIdentityModal === "EMAIL" ? "user@example.com" : "01711223344"
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#ead8cf] text-sm focus:outline-none focus:ring-2 focus:ring-[#8b5a45]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#2d1f1a] mb-1">
+                    Current Password (Required for confirmation)
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter your current password"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#ead8cf] text-sm focus:outline-none focus:ring-2 focus:ring-[#8b5a45]"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowIdentityModal(null);
+                      setIdentityError("");
+                      setIdentitySuccess("");
+                    }}
+                    className="flex-1 py-2.5 rounded-full border border-[#ead8cf] text-xs font-semibold text-[#2d1f1a] hover:bg-[#f8f1ed]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={identityLoading}
+                    className="flex-1 py-2.5 rounded-full bg-[#8b5a45] text-white text-xs font-semibold hover:bg-[#6f4032] disabled:opacity-50"
+                  >
+                    {identityLoading ? "Saving..." : "Save Changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
 
         <section className="rounded-[30px] border border-[#ead8cf] bg-white p-6 shadow-sm md:p-8">
           <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">

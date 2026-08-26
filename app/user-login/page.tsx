@@ -220,13 +220,21 @@ export default function UserLoginPage() {
                       <span className="text-sm font-semibold text-[#2e221d]">
                         Password
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowLoginPassword((prev) => !prev)}
-                        className="text-xs font-semibold text-[#7a5244] hover:underline"
-                      >
-                        {showLoginPassword ? "Hide" : "Show"}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <Link
+                          href="/forgot-password"
+                          className="text-xs font-semibold text-[#7a5244] hover:underline"
+                        >
+                          Forgot Password?
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setShowLoginPassword((prev) => !prev)}
+                          className="text-xs font-semibold text-[#7a5244] hover:underline"
+                        >
+                          {showLoginPassword ? "Hide" : "Show"}
+                        </button>
+                      </div>
                     </div>
                     <input
                       type={showLoginPassword ? "text" : "password"}
