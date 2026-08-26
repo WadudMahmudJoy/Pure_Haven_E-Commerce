@@ -1,18 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function UserLoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
 
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginIdentifier, setLoginIdentifier] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   const [name, setName] = useState("");
-  const [registerEmail, setRegisterEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [registerIdentifier, setRegisterIdentifier] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,13 +26,12 @@ export default function UserLoginPage() {
     setMessage("");
 
     try {
-      const res = await fetch("/api/customer-auth", {
+      const res = await fetch("/api/customer-auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          mode: "login",
-          email: loginEmail,
+          identifier: loginIdentifier,
           password: loginPassword,
         }),
       });
@@ -37,15 +39,17 @@ export default function UserLoginPage() {
       const data = await res.json();
 
       if (!res.ok || !data?.success) {
-        throw new Error(data?.message || "Login failed.");
+        throw new Error(data?.message || "Email/phone or password is incorrect.");
       }
 
-      localStorage.setItem("pure_haven_customer_logged_in", "true");
-      localStorage.setItem("pure_haven_customer_name", data.user?.name || "");
-      localStorage.setItem("pure_haven_customer_email", data.user?.email || "");
-      localStorage.setItem("pure_haven_customer_phone", data.user?.phone || "");
+      // Clear legacy localStorage identity keys
+      localStorage.removeItem("pure_haven_customer_logged_in");
+      localStorage.removeItem("pure_haven_customer_name");
+      localStorage.removeItem("pure_haven_customer_email");
+      localStorage.removeItem("pure_haven_customer_phone");
 
-      window.location.href = "/customer/dashboard";
+      router.push("/customer/dashboard");
+      router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Login failed.");
     } finally {
@@ -59,16 +63,14 @@ export default function UserLoginPage() {
     setMessage("");
 
     try {
-      const res = await fetch("/api/customer-auth", {
+      const res = await fetch("/api/customer-auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
-          mode: "register",
           name,
-          email: registerEmail,
-          phone,
+          identifier: registerIdentifier,
           password: registerPassword,
-          confirmPassword,
         }),
       });
 
@@ -78,9 +80,9 @@ export default function UserLoginPage() {
         throw new Error(data?.message || "Registration failed.");
       }
 
-      setMessage("Registration successful. Please login now.");
-      setLoginEmail(registerEmail);
-      setMode("login");
+      // Registration immediately creates an active session
+      router.push("/customer/dashboard");
+      router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Registration failed.");
     } finally {
@@ -95,12 +97,12 @@ export default function UserLoginPage() {
           {/* Left Info Panel */}
           <section className="hidden bg-[#2e221d] p-10 text-white md:flex md:flex-col md:justify-between">
             <div>
-              <a
+              <Link
                 href="/"
                 className="inline-flex rounded-full border border-white/20 px-4 py-2 text-sm font-semibold transition hover:bg-white/10"
               >
                 ← Back to Home
-              </a>
+              </Link>
 
               <p className="mt-10 text-xs font-bold uppercase tracking-[0.35em] text-white/65">
                 Pure Haven BD
@@ -113,16 +115,16 @@ export default function UserLoginPage() {
               </h2>
 
               <p className="mt-5 max-w-sm text-sm leading-7 text-white/75">
-                Create an account to keep your shopping experience smoother and easier for future orders.
+                Log in or create an account with your email or phone number to view your order history and manage your profile.
               </p>
             </div>
 
             <div className="mt-10 grid gap-3 text-sm text-white/85">
               <div className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3">
-                Faster access to your account
+                Unified email or phone login
               </div>
               <div className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3">
-                Simple login and registration
+                Secure persistent session
               </div>
               <div className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3">
                 Designed for Pure Haven BD customers
@@ -132,12 +134,12 @@ export default function UserLoginPage() {
 
           {/* Form Panel */}
           <section className="p-5 sm:p-7 md:p-10">
-            <a
+            <Link
               href="/"
               className="mb-6 inline-flex rounded-full border border-[#ead9d1] px-4 py-2 text-sm font-semibold text-[#2e221d] hover:bg-[#f8f3ef] md:hidden"
             >
               ← Back to Home
-            </a>
+            </Link>
 
             <div className="max-w-xl">
               <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#7a5244]">
@@ -155,7 +157,10 @@ export default function UserLoginPage() {
               </p>
 
               {message ? (
-                <div className="mt-5 rounded-2xl border border-[#ead9d1] bg-[#fffaf7] p-4 text-sm text-[#2e221d]">
+                <div
+                  role="alert"
+                  className="mt-5 rounded-2xl border border-[#ead9d1] bg-[#fffaf7] p-4 text-sm text-[#2e221d]"
+                >
                   {message}
                 </div>
               ) : null}
@@ -196,24 +201,37 @@ export default function UserLoginPage() {
                 <form onSubmit={handleLogin} className="mt-7 grid gap-4">
                   <label className="grid gap-2">
                     <span className="text-sm font-semibold text-[#2e221d]">
-                      Email Address
+                      Email or Phone Number
                     </span>
                     <input
-                      type="email"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
+                      type="text"
+                      name="identifier"
+                      autoComplete="username"
+                      value={loginIdentifier}
+                      onChange={(e) => setLoginIdentifier(e.target.value)}
                       className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
-                      placeholder="Enter your email"
+                      placeholder="e.g. user@example.com or 01711223344"
                       required
                     />
                   </label>
 
                   <label className="grid gap-2">
-                    <span className="text-sm font-semibold text-[#2e221d]">
-                      Password
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-[#2e221d]">
+                        Password
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword((prev) => !prev)}
+                        className="text-xs font-semibold text-[#7a5244] hover:underline"
+                      >
+                        {showLoginPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
                     <input
-                      type="password"
+                      type={showLoginPassword ? "text" : "password"}
+                      name="password"
+                      autoComplete="current-password"
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
                       className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
@@ -232,50 +250,64 @@ export default function UserLoginPage() {
                 </form>
               ) : (
                 <form onSubmit={handleRegister} className="mt-7 grid gap-4">
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
-                    placeholder="Full name"
-                    required
-                  />
-
-                  <input
-                    type="email"
-                    value={registerEmail}
-                    onChange={(e) => setRegisterEmail(e.target.value)}
-                    className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
-                    placeholder="Email address"
-                    required
-                  />
-
-                  <input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
-                    placeholder="Phone number"
-                    required
-                  />
-
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-[#2e221d]">
+                      Full Name
+                    </span>
                     <input
-                      type="password"
+                      type="text"
+                      name="name"
+                      autoComplete="name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                      placeholder="Your name"
+                      required
+                    />
+                  </label>
+
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-[#2e221d]">
+                      Email or Phone Number
+                    </span>
+                    <input
+                      type="text"
+                      name="identifier"
+                      autoComplete="username"
+                      value={registerIdentifier}
+                      onChange={(e) => setRegisterIdentifier(e.target.value)}
+                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
+                      placeholder="e.g. user@example.com or 01711223344"
+                      required
+                    />
+                  </label>
+
+                  <label className="grid gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-[#2e221d]">
+                        Password
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowRegisterPassword((prev) => !prev)}
+                        className="text-xs font-semibold text-[#7a5244] hover:underline"
+                      >
+                        {showRegisterPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                    <input
+                      type={showRegisterPassword ? "text" : "password"}
+                      name="new-password"
+                      autoComplete="new-password"
                       value={registerPassword}
                       onChange={(e) => setRegisterPassword(e.target.value)}
                       className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
-                      placeholder="Password"
+                      placeholder="Minimum 8 characters"
                       required
+                      minLength={8}
+                      maxLength={128}
                     />
-
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="rounded-2xl border border-[#ead9d1] bg-white px-4 py-3 text-base outline-none transition focus:border-[#7a5244]"
-                      placeholder="Confirm password"
-                      required
-                    />
-                  </div>
+                  </label>
 
                   <button
                     type="submit"

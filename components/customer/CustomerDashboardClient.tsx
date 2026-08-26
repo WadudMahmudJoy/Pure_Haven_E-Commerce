@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   isOrderActive,
   getOrderStatusLabel,
@@ -10,8 +12,9 @@ import {
 type CustomerUser = {
   id: string;
   name: string;
-  email: string;
-  phone: string;
+  email?: string | null;
+  normalizedPhone?: string | null;
+  phone?: string | null;
   createdAt?: string;
 };
 
@@ -62,54 +65,65 @@ function itemCount(order: Order) {
 }
 
 export default function CustomerDashboardClient() {
+  const router = useRouter();
   const [user, setUser] = useState<CustomerUser | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  async function loadDashboard() {
+  const [reloadIndex, setReloadIndex] = useState(0);
+
+  const loadDashboard = useCallback(() => {
     setLoading(true);
-    setMessage("");
-
-    try {
-      const authRes = await fetch("/api/customer-auth", {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
-
-      const authData = await authRes.json().catch(() => null);
-
-      if (!authRes.ok || !authData?.authenticated) {
-        window.location.href = "/user-login";
-        return;
-      }
-
-      setUser(authData.user);
-
-      const ordersRes = await fetch("/api/customer-orders", {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
-
-      const ordersData = await ordersRes.json().catch(() => null);
-
-      if (!ordersRes.ok || !ordersData?.success) {
-        throw new Error(ordersData?.message || "Could not load order history.");
-      }
-
-      setOrders(Array.isArray(ordersData.orders) ? ordersData.orders : []);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Dashboard load failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    setReloadIndex((prev) => prev + 1);
+  }, []);
 
   useEffect(() => {
-    loadDashboard();
-  }, []);
+    let ignore = false;
+
+    async function startFetching() {
+      try {
+        const authRes = await fetch("/api/customer-auth/session", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const authData = await authRes.json().catch(() => null);
+
+        if (!authRes.ok || !authData?.authenticated) {
+          if (!ignore) router.push("/user-login");
+          return;
+        }
+
+        if (!ignore) setUser(authData.user);
+
+        const ordersRes = await fetch("/api/customer-orders", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const ordersData = await ordersRes.json().catch(() => null);
+
+        if (!ordersRes.ok || !ordersData?.success) {
+          throw new Error(ordersData?.message || "Could not load order history.");
+        }
+
+        if (!ignore) setOrders(Array.isArray(ordersData.orders) ? ordersData.orders : []);
+      } catch (error) {
+        if (!ignore) setMessage(error instanceof Error ? error.message : "Dashboard load failed.");
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    startFetching();
+
+    return () => {
+      ignore = true;
+    };
+  }, [router, reloadIndex]);
 
   const stats = useMemo(() => {
     const totalOrders = orders.length;
@@ -125,18 +139,18 @@ export default function CustomerDashboardClient() {
 
   async function logout() {
     try {
-      await fetch("/api/customer-auth", {
+      await fetch("/api/customer-auth/logout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ mode: "logout" }),
       });
     } finally {
       localStorage.removeItem("pure_haven_customer_logged_in");
       localStorage.removeItem("pure_haven_customer_name");
       localStorage.removeItem("pure_haven_customer_email");
       localStorage.removeItem("pure_haven_customer_phone");
-      window.location.href = "/user-login";
+      router.push("/user-login");
+      router.refresh();
     }
   }
 
@@ -154,18 +168,18 @@ export default function CustomerDashboardClient() {
     <main className="min-h-screen bg-[#fbf7f4] px-4 py-8 text-[#171717] sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl space-y-8">
         <nav className="flex flex-wrap gap-3 rounded-[24px] border border-[#ead8cf] bg-white p-4 shadow-sm">
-          <a className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/">
+          <Link className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/">
             Home
-          </a>
-          <a className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/shop">
+          </Link>
+          <Link className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/shop">
             Shop
-          </a>
-          <a className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/cart">
+          </Link>
+          <Link className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/cart">
             Cart
-          </a>
-          <a className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/track-order">
+          </Link>
+          <Link className="rounded-full border border-[#ead8cf] bg-white px-4 py-2 text-sm font-medium text-[#2d1f1a] hover:bg-[#f8f1ed]" href="/track-order">
             Track Order
-          </a>
+          </Link>
           <button
             type="button"
             onClick={logout}
@@ -185,16 +199,16 @@ export default function CustomerDashboardClient() {
                 Welcome{user?.name ? `, ${user.name}` : ""}
               </h1>
               <p className="mt-2 text-sm text-[#6f5d54]">
-                {user?.email || "No email"} · {user?.phone || "No phone"}
+                {user?.email || "No email"} · {user?.normalizedPhone || user?.phone || "No phone"}
               </p>
             </div>
 
-            <a
+            <Link
               href="/shop"
               className="rounded-full bg-[#8b5a45] px-6 py-3 text-sm font-semibold text-white hover:bg-[#6f4032]"
             >
               Continue Shopping
-            </a>
+            </Link>
           </div>
 
           {message ? (
