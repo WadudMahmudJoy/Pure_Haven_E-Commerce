@@ -6,6 +6,7 @@ import {
   validateCustomerSession,
   clearCustomerSessionCookie,
 } from "@/lib/customerSession";
+import { validateSameOrigin } from "@/lib/csrf";
 import { invalidateProductReadCache } from "@/lib/serverReadCache";
 import { consumeRateLimit } from "@/lib/rateLimit";
 import {
@@ -384,6 +385,15 @@ export async function POST(req: NextRequest) {
     let shouldClearStaleCookie = false;
 
     if (rawCustomerToken) {
+      // If customer session cookie is being consumed, enforce same-origin protection
+      const csrf = validateSameOrigin(req);
+      if (!csrf.valid) {
+        return NextResponse.json(
+          { success: false, message: "Cross-origin request blocked." },
+          { status: 403 }
+        );
+      }
+
       const sessionResult = await validateCustomerSession(rawCustomerToken);
       if (sessionResult.authenticated && sessionResult.user && sessionResult.user.isActive) {
         authoritativeUserId = sessionResult.user.id;
@@ -402,9 +412,11 @@ export async function POST(req: NextRequest) {
         include: { items: true },
       });
       if (existing) {
-        // Cross-user submission-token safety:
-        // If existing order is owned by an authenticated user and current requester has different identity:
-        if (existing.userId && existing.userId !== authoritativeUserId) {
+        // Cross-identity submission-token safety:
+        // Ownership context must match exactly (same user ID or both null/guest).
+        // If ownership contexts differ (User A vs User B, User vs Guest, or Guest vs User):
+        const existingUserId = existing.userId ?? null;
+        if (existingUserId !== authoritativeUserId) {
           return NextResponse.json(
             { success: false, message: "Order submission conflict." },
             { status: 409 }

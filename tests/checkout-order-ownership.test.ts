@@ -67,6 +67,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payload),
       });
@@ -133,6 +134,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payload),
       });
@@ -261,6 +263,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${sessionA.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payload),
       });
@@ -331,6 +334,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payload),
       });
@@ -343,6 +347,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
         method: "GET",
         headers: {
           cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
         },
       });
 
@@ -408,6 +413,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payload),
       });
@@ -422,6 +428,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payload),
       });
@@ -496,6 +503,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${sessionA.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payloadA),
       });
@@ -519,6 +527,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${sessionB.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payloadB),
       });
@@ -587,6 +596,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
           "Content-Type": "application/json",
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           cookie: `pure_haven_customer_session=${sessionA.rawToken}`,
+          origin: "http://localhost:3000",
         },
         body: JSON.stringify(payloadA),
       });
@@ -627,6 +637,209 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       await prisma.order.deleteMany({ where: { submissionToken } }).catch(() => {});
       await prisma.product.delete({ where: { id: product.id } }).catch(() => {});
       await prisma.user.delete({ where: { id: userA.id } }).catch(() => {});
+    }
+  });
+
+  it("H. Guest order with token T, then authenticated retry with token T returns 409 conflict", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+
+    const userA = await prisma.user.create({
+      data: {
+        name: "User A",
+        email: `user_a_${suffix}@example.com`,
+        normalizedPhone: "01711665544",
+        passwordHash,
+        isActive: true,
+      },
+    });
+
+    const sessionA = await createCustomerSession(userA.id);
+
+    const product = await prisma.product.create({
+      data: {
+        name: `Guest Auth Race Product ${suffix}`,
+        price: 350,
+        stock: 5,
+        image: "/placeholder.png",
+        category: "Skincare",
+      },
+    });
+
+    const submissionToken = `tok-guest-then-auth-${suffix}`;
+
+    try {
+      // 1. Guest creates order with submissionToken
+      const payloadGuest = {
+        submissionToken,
+        customerName: "Anonymous Guest",
+        customerPhone: "01800000000",
+        customerCity: "Dhaka",
+        customerAddress: "Dhanmondi",
+        paymentMethod: "Cash on Delivery",
+        items: [{ productId: product.id, quantity: 1, price: 350, name: product.name }],
+      };
+
+      const reqGuest = new NextRequest("http://localhost:3000/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
+        },
+        body: JSON.stringify(payloadGuest),
+      });
+
+      const resGuest = await POST(reqGuest);
+      assert.strictEqual(resGuest.status, 200);
+
+      // 2. Authenticated user sends same submissionToken
+      const payloadAuth = {
+        submissionToken,
+        customerName: "User A",
+        customerPhone: "01711665544",
+        customerCity: "Dhaka",
+        customerAddress: "Banani",
+        paymentMethod: "Cash on Delivery",
+        items: [{ productId: product.id, quantity: 1, price: 350, name: product.name }],
+      };
+
+      const reqAuth = new NextRequest("http://localhost:3000/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
+          cookie: `pure_haven_customer_session=${sessionA.rawToken}`,
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify(payloadAuth),
+      });
+
+      const resAuth = await POST(reqAuth);
+      const dataAuth = await resAuth.json();
+
+      assert.strictEqual(
+        resAuth.status,
+        409,
+        `BEHAVIORAL RED: Authenticated retry for guest-created token must return 409 conflict, got ${resAuth.status}`
+      );
+      assert.strictEqual(dataAuth.success, false);
+
+      // Verify guest order remained userId = null and was not mutated
+      const dbOrder = await prisma.order.findUnique({
+        where: { submissionToken },
+      });
+      assert.strictEqual(dbOrder?.userId, null, "Guest order must remain userId = null");
+    } finally {
+      await prisma.order.deleteMany({ where: { submissionToken } }).catch(() => {});
+      await prisma.product.delete({ where: { id: product.id } }).catch(() => {});
+      await prisma.user.delete({ where: { id: userA.id } }).catch(() => {});
+    }
+  });
+
+  it("I. Authenticated checkout with customer session rejects cross-origin request with 403", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+
+    const user = await prisma.user.create({
+      data: {
+        name: "CSRF User",
+        email: `csrf_user_${suffix}@example.com`,
+        normalizedPhone: "01711998877",
+        passwordHash,
+        isActive: true,
+      },
+    });
+
+    const session = await createCustomerSession(user.id);
+
+    const product = await prisma.product.create({
+      data: {
+        name: `CSRF Product ${suffix}`,
+        price: 250,
+        stock: 5,
+        image: "/placeholder.png",
+        category: "Skincare",
+      },
+    });
+
+    try {
+      const payload = {
+        submissionToken: `tok-csrf-${suffix}`,
+        customerName: "CSRF User",
+        customerPhone: "01711998877",
+        customerCity: "Dhaka",
+        customerAddress: "Banani",
+        paymentMethod: "Cash on Delivery",
+        items: [{ productId: product.id, quantity: 1, price: 250, name: product.name }],
+      };
+
+      // Malicious Origin
+      const req = new NextRequest("http://localhost:3000/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
+          cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://attacker-controlled-site.com",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const res = await POST(req);
+      assert.strictEqual(
+        res.status,
+        403,
+        `BEHAVIORAL RED: Cross-origin authenticated checkout must return 403, got ${res.status}`
+      );
+    } finally {
+      await prisma.order.deleteMany({ where: { submissionToken: `tok-csrf-${suffix}` } }).catch(() => {});
+      await prisma.product.delete({ where: { id: product.id } }).catch(() => {});
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("J. Guest checkout without session cookie succeeds without requiring customer CSRF validation", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const product = await prisma.product.create({
+      data: {
+        name: `Guest Public Product ${suffix}`,
+        price: 200,
+        stock: 5,
+        image: "/placeholder.png",
+        category: "Skincare",
+      },
+    });
+
+    try {
+      const payload = {
+        submissionToken: `tok-guest-public-${suffix}`,
+        customerName: "Public Guest",
+        customerPhone: "01822334455",
+        customerCity: "Dhaka",
+        customerAddress: "Mirpur",
+        paymentMethod: "Cash on Delivery",
+        items: [{ productId: product.id, quantity: 1, price: 200, name: product.name }],
+      };
+
+      const req = new NextRequest("http://localhost:3000/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const res = await POST(req);
+      assert.strictEqual(res.status, 200);
+
+      const dbOrder = await prisma.order.findUnique({
+        where: { submissionToken: `tok-guest-public-${suffix}` },
+      });
+      assert.strictEqual(dbOrder?.userId, null);
+    } finally {
+      await prisma.order.deleteMany({ where: { submissionToken: `tok-guest-public-${suffix}` } }).catch(() => {});
+      await prisma.product.delete({ where: { id: product.id } }).catch(() => {});
     }
   });
 });
