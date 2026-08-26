@@ -69,11 +69,16 @@ model Order {
   deliveryFailureReason String?
   deliveryFailureNote   String?
   deliveryFailedAt      DateTime?
+  userId                String?
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
   items                 OrderItem[]
   paymentRecord         PaymentRecord?
+  user                  User?          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
 }
+
 
 model OrderItem {
   id             Int     @id @default(autoincrement())
@@ -230,4 +235,59 @@ model HomeSlide {
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+model User {
+  id              String    @id @default(cuid())
+  name            String
+  email           String?   @unique
+  normalizedPhone String?   @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  orders          Order[]
+  sessions        CustomerSession[]
+  authTokens      CustomerAuthToken[]
+}
+
+model CustomerSession {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+enum AuthTokenPurpose {
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+}
+
+model CustomerAuthToken {
+  id         String           @id @default(cuid())
+  userId     String
+  purpose    AuthTokenPurpose
+  tokenHash  String           @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@index([consumedAt])
 }
