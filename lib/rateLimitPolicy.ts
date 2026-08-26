@@ -26,6 +26,20 @@ export const ADMIN_RECOVERY_GLOBAL_WINDOW_SECONDS = 60; // 60 seconds
 export const ORDER_CREATION_MAX_REQUESTS_PER_CLIENT = 10;
 export const ORDER_CREATION_WINDOW_SECONDS = 60; // 60 seconds
 
+// Customer Authentication Rate Limits (Phase 3)
+// Customer Login (Per-Client & Process-Global CPU Safety Valve)
+export const CUSTOMER_LOGIN_MAX_ATTEMPTS_PER_CLIENT = 5;
+export const CUSTOMER_LOGIN_WINDOW_SECONDS = 900; // 15 minutes
+export const CUSTOMER_LOGIN_GLOBAL_MAX_ATTEMPTS = 60;
+export const CUSTOMER_LOGIN_GLOBAL_WINDOW_SECONDS = 60; // 60 seconds
+
+// Customer Registration (Per-Client & Process-Global)
+export const CUSTOMER_REGISTER_MAX_ATTEMPTS_PER_CLIENT = 3;
+export const CUSTOMER_REGISTER_WINDOW_SECONDS = 3600; // 1 hour
+export const CUSTOMER_REGISTER_GLOBAL_MAX_ATTEMPTS = 30;
+export const CUSTOMER_REGISTER_GLOBAL_WINDOW_SECONDS = 3600; // 1 hour
+
+
 /**
  * Validates and normalizes an IP candidate string using standard Node.js IP parsing.
  */
