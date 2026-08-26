@@ -14,6 +14,18 @@ type CheckoutForm = {
   transactionId: string;
 };
 
+type CheckoutCartItem = {
+  id?: number | string;
+  productId?: number;
+  variantId?: number | null;
+  name?: string;
+  productName?: string;
+  price?: number;
+  quantity?: number;
+  image?: string;
+  category?: string;
+};
+
 function money(value: number) {
   return `৳${value.toLocaleString("en-BD")}`;
 }
@@ -39,10 +51,37 @@ export default function CheckoutPage() {
     if (!submissionTokenRef.current && typeof crypto !== "undefined" && crypto.randomUUID) {
       submissionTokenRef.current = crypto.randomUUID();
     }
+
+    let isMounted = true;
+    async function checkSession() {
+      try {
+        const res = await fetch("/api/customer-auth/session", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => null);
+        if (isMounted && data?.authenticated && data?.user) {
+          setForm((prev) => ({
+            ...prev,
+            name: prev.name || data.user.name || "",
+            phone: prev.phone || data.user.normalizedPhone || data.user.phone || "",
+          }));
+        }
+      } catch {
+        // Guest fallback
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const subtotal = useMemo(() => {
-    return cartItems.reduce((sum: number, item: any) => {
+    return cartItems.reduce((sum: number, item: CheckoutCartItem) => {
       const qty = Number(item.quantity || 1);
       const price = Number(item.price || 0);
       return sum + qty * price;
@@ -83,7 +122,7 @@ export default function CheckoutPage() {
         submissionTokenRef.current = crypto.randomUUID();
       }
 
-      const orderItems = cartItems.map((item: any) => {
+      const orderItems = cartItems.map((item: CheckoutCartItem) => {
         const qty = Number(item.quantity || 1);
         const price = Number(item.price || 0);
         const rawId = Number(item.id || 0);
@@ -276,7 +315,7 @@ export default function CheckoutPage() {
               {cartItems.length === 0 ? (
                 <p className="text-sm text-neutral-600">Your cart is empty.</p>
               ) : (
-                cartItems.map((item: any) => {
+                cartItems.map((item: CheckoutCartItem) => {
                   const qty = Number(item.quantity || 1);
                   const price = Number(item.price || 0);
 

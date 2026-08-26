@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/adminSession";
+import {
+  getCustomerSessionTokenFromRequest,
+  validateCustomerSession,
+  clearCustomerSessionCookie,
+} from "@/lib/customerSession";
 import { invalidateProductReadCache } from "@/lib/serverReadCache";
 import { consumeRateLimit } from "@/lib/rateLimit";
 import {
@@ -373,6 +378,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 2. Resolve optional customer session BEFORE entering commerce transaction
+    const rawCustomerToken = getCustomerSessionTokenFromRequest(req);
+    let authoritativeUserId: string | null = null;
+    let shouldClearStaleCookie = false;
+
+    if (rawCustomerToken) {
+      const sessionResult = await validateCustomerSession(rawCustomerToken);
+      if (sessionResult.authenticated && sessionResult.user && sessionResult.user.isActive) {
+        authoritativeUserId = sessionResult.user.id;
+      } else {
+        shouldClearStaleCookie = true;
+      }
+    }
+
     const body = (await req.json()) as OrderBody;
     const submissionToken = normalizeString(body.submissionToken) || null;
 
@@ -383,11 +402,24 @@ export async function POST(req: NextRequest) {
         include: { items: true },
       });
       if (existing) {
-        return NextResponse.json({
+        // Cross-user submission-token safety:
+        // If existing order is owned by an authenticated user and current requester has different identity:
+        if (existing.userId && existing.userId !== authoritativeUserId) {
+          return NextResponse.json(
+            { success: false, message: "Order submission conflict." },
+            { status: 409 }
+          );
+        }
+
+        const res = NextResponse.json({
           success: true,
           message: "Order resolved via submission token.",
           order: mapOrder(existing, { includeAudit: false }),
         });
+        if (shouldClearStaleCookie) {
+          clearCustomerSessionCookie(res);
+        }
+        return res;
       }
     }
 
@@ -520,6 +552,7 @@ export async function POST(req: NextRequest) {
             data: {
               orderId,
               submissionToken,
+              userId: authoritativeUserId,
               customerName,
               customerPhone,
               customerCity,
@@ -584,11 +617,17 @@ export async function POST(req: NextRequest) {
 
     invalidateProductReadCache();
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "Order created successfully.",
       order: mapOrder(order, { includeAudit: false }),
     });
+
+    if (shouldClearStaleCookie) {
+      clearCustomerSessionCookie(response);
+    }
+
+    return response;
   } catch (error) {
     if (error instanceof InventoryConflictError) {
       return NextResponse.json(
