@@ -28,16 +28,24 @@ import { validateTestDatabaseSafety } from "./db-safety";
 
 const { Pool } = pg;
 
-describe("Wave A — Real PostgreSQL Schema & Constraint Integrity", () => {
-  let pool: pg.Pool;
-  let prismaTest: PrismaClient;
+const safety = validateTestDatabaseSafety();
 
-  before(async () => {
-    const safety = validateTestDatabaseSafety();
-    if (!safety.safe) {
-      throw new Error(`Database safety validation failed: ${safety.reason}`);
-    }
-    const testUrl = process.env.DATABASE_URL_TEST!;
+describe(
+  "Wave A — Real PostgreSQL Schema & Constraint Integrity",
+  {
+    skip:
+      !safety.safe &&
+      "TEST_DATABASE_REQUIRED: Set DATABASE_URL_TEST to run real PostgreSQL concurrency tests",
+  },
+  () => {
+    let pool: pg.Pool;
+    let prismaTest: PrismaClient;
+
+    before(async () => {
+      if (!safety.safe) {
+        return;
+      }
+      const testUrl = process.env.DATABASE_URL_TEST!;
 
     pool = new Pool({ connectionString: testUrl });
     const adapter = new PrismaPg({ connectionString: testUrl });

@@ -10,6 +10,7 @@
  *    - Authenticated User A ONLY sees Order with userId = A.id.
  */
 
+import "dotenv/config";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GET } from "../app/api/customer-orders/route.js";
@@ -63,7 +64,7 @@ describe("Wave B — Customer Orders Boundary Security & IDOR Isolation Check", 
   });
 
   it("REJECTS historical guest order disclosure: phone-matching guest order (userId = null) MUST NOT be returned to authenticated user", async () => {
-    const victimPhone = "01812999888";
+    const victimPhone = "018" + Math.floor(10000000 + Math.random() * 90000000);
     const suffix = Math.random().toString(36).slice(2, 8);
 
     // 1. Create a Historical Guest Order with userId = null and customerPhone = victimPhone
@@ -128,12 +129,15 @@ describe("Wave B — Customer Orders Boundary Security & IDOR Isolation Check", 
   it("ENFORCES strict userId ownership isolation: User A sees only A's orders, never User B's orders", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);
 
+    const phoneA = "017" + Math.floor(10000000 + Math.random() * 90000000);
+    const phoneB = "017" + Math.floor(10000000 + Math.random() * 90000000);
+
     // Create User A and User B
     const userA = await prisma.user.create({
       data: {
         name: "User A",
         email: `user_a_${suffix}@example.com`,
-        normalizedPhone: "01711000111",
+        normalizedPhone: phoneA,
         passwordHash: "dummyHash",
         isActive: true,
       },
@@ -143,7 +147,7 @@ describe("Wave B — Customer Orders Boundary Security & IDOR Isolation Check", 
       data: {
         name: "User B",
         email: `user_b_${suffix}@example.com`,
-        normalizedPhone: "01711000222",
+        normalizedPhone: phoneB,
         passwordHash: "dummyHash",
         isActive: true,
       },

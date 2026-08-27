@@ -9,6 +9,9 @@
  * 5. Rate limiting on recovery and verification endpoints.
  */
 
+import "dotenv/config";
+(process.env as Record<string, string | undefined>).NODE_ENV = "test";
+process.env.TEST_MAIL_TRANSPORT = "true";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -34,12 +37,13 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
     const email = `reset_req_${suffix}@example.com`;
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: "Verified User",
         email,
-        normalizedPhone: "01711445566",
+        normalizedPhone: phone,
         passwordHash,
         emailVerifiedAt: new Date(), // Verified
         isActive: true,
@@ -82,12 +86,13 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
     const email = `unverified_req_${suffix}@example.com`;
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: "Unverified User",
         email,
-        normalizedPhone: "01711445577",
+        normalizedPhone: phone,
         passwordHash,
         emailVerifiedAt: null, // Unverified
         isActive: true,
@@ -123,12 +128,13 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     clearSentMail();
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: `Phone Only Reset User ${suffix}`,
         email: null,
-        normalizedPhone: "01711445588",
+        normalizedPhone: phone,
         passwordHash,
         isActive: true,
       },
@@ -142,7 +148,7 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
           "x-forwarded-for": `10.99.${Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 200)}`,
           origin: "http://localhost:3000",
         },
-        body: JSON.stringify({ identifier: "01711445588" }),
+        body: JSON.stringify({ identifier: phone }),
       });
 
       const res = await handleResetRequest(req);
@@ -164,12 +170,13 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const initialHash = await hashCustomerPassword("OldPass!123");
     const email = `full_reset_${suffix}@example.com`;
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: "Full Reset User",
         email,
-        normalizedPhone: "01711445599",
+        normalizedPhone: phone,
         passwordHash: initialHash,
         emailVerifiedAt: new Date(),
         isActive: true,
@@ -255,12 +262,13 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
     const email = `verify_flow_${suffix}@example.com`;
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: "Verify Flow User",
         email,
-        normalizedPhone: "01711445500",
+        normalizedPhone: phone,
         passwordHash,
         emailVerifiedAt: null, // Unverified
         isActive: true,
@@ -650,7 +658,7 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
       );
     } finally {
       envObj.NODE_ENV = originalNodeEnv;
-      delete envObj.TEST_MAIL_TRANSPORT;
+      envObj.TEST_MAIL_TRANSPORT = "true";
     }
   });
 
@@ -659,7 +667,7 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
     const email = `phone_routing_${suffix}@example.com`;
-    const phone = "01711223399";
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
@@ -681,7 +689,7 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
           "x-forwarded-for": "10.99.24.1",
           origin: "http://localhost:3000",
         },
-        body: JSON.stringify({ identifier: "+880 1711-223399" }),
+        body: JSON.stringify({ identifier: phone }),
       });
 
       const res = await handleResetRequest(req);

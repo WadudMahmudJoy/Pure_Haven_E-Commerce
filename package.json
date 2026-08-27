@@ -8,6 +8,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test tests/**/*.test.ts",
     "import:products": "tsx scripts/import-products.ts",
     "postinstall": "prisma generate"
   },

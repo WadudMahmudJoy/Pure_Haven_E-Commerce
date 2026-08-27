@@ -25,11 +25,16 @@ import { POST as handleResetConfirm } from "../../app/api/customer-auth/password
 import { POST as handleLogin } from "../../app/api/customer-auth/login/route.js";
 import { GET as handleCustomerOrders } from "../../app/api/customer-orders/route.js";
 
-describe("Wave D — Real PostgreSQL Customer Auth Concurrency & Integrity", () => {
-  before(async () => {
-    const safety = validateTestDatabaseSafety();
-    assert.strictEqual(safety.safe, true, `Database safety check failed: ${safety.reason}`);
-  });
+const safety = validateTestDatabaseSafety();
+
+describe(
+  "Wave D — Real PostgreSQL Customer Auth Concurrency & Integrity",
+  {
+    skip:
+      !safety.safe &&
+      "TEST_DATABASE_REQUIRED: Set DATABASE_URL_TEST to run real PostgreSQL concurrency tests",
+  },
+  () => {
 
   it("1. Concurrent Password Reset Confirmation Race — Exactly one winner consumes token and updates password", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);

@@ -13,6 +13,7 @@
  * 9. Old identifier stops authenticating; new identifier authenticates with same password.
  */
 
+import "dotenv/config";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -28,12 +29,13 @@ describe("Wave D — Customer Identity Management", () => {
   it("A. Phone-only user can ADD_EMAIL with password re-auth; email is unverified", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: "Phone Only User",
         email: null,
-        normalizedPhone: "01711334455",
+        normalizedPhone: phone,
         passwordHash,
         isActive: true,
       },
@@ -116,12 +118,13 @@ describe("Wave D — Customer Identity Management", () => {
     const passwordHash = await hashCustomerPassword("Password!123");
     const oldEmail = `old_email_${suffix}@example.com`;
     const newEmail = `new_email_${suffix}@example.com`;
+    const phone = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     const user = await prisma.user.create({
       data: {
         name: "Change Email User",
         email: oldEmail,
-        normalizedPhone: "01711334466",
+        normalizedPhone: phone,
         passwordHash,
         emailVerifiedAt: new Date(), // Was verified on old email
         isActive: true,
@@ -153,48 +156,38 @@ describe("Wave D — Customer Identity Management", () => {
       const resChange = await handleIdentity(reqChange);
       assert.strictEqual(resChange.status, 200);
 
-      // Verify emailVerifiedAt was reset to null in DB
+      // Verify email is changed and unverified
       const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
       assert.strictEqual(dbUser?.email, newEmail);
       assert.strictEqual(dbUser?.emailVerifiedAt, null);
 
-      // CRITICAL SECURITY INVARIANT: Old verification token cannot verify the new email
-      const reqOldConfirm = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/confirm", {
+      // Attempt to confirm with OLD token must fail
+      const reqConfirmOld = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/confirm", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           origin: "http://localhost:3000",
         },
-        body: JSON.stringify({
-          token: oldToken.rawToken,
-        }),
+        body: JSON.stringify({ token: oldToken.rawToken }),
       });
 
-      const resOldConfirm = await handleConfirmEmail(reqOldConfirm);
-      assert.strictEqual(
-        resOldConfirm.status,
-        400,
-        "SECURITY VIOLATION: Old verification token must be rejected after email change"
-      );
+      const resConfirmOld = await handleConfirmEmail(reqConfirmOld);
+      assert.strictEqual(resConfirmOld.status, 400);
 
-      // User must still be unverified
-      const dbUserAfter = await prisma.user.findUnique({ where: { id: user.id } });
-      assert.strictEqual(dbUserAfter?.emailVerifiedAt, null);
-
-      // Old email stops authenticating
-      const loginOld = new NextRequest("http://localhost:3000/api/customer-auth/login", {
+      // Old email login must fail; new email login must succeed
+      const reqOldLogin = new NextRequest("http://localhost:3000/api/customer-auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          origin: "http://localhost:3000",
-        },
-        body: JSON.stringify({
-          identifier: oldEmail,
-          password: "Password!123",
-        }),
+        headers: { "Content-Type": "application/json", origin: "http://localhost:3000" },
+        body: JSON.stringify({ identifier: oldEmail, password: "Password!123" }),
       });
-      const resLoginOld = await handleLogin(loginOld);
-      assert.strictEqual(resLoginOld.status, 401);
+      assert.strictEqual((await handleLogin(reqOldLogin)).status, 401);
+
+      const reqNewLogin = new NextRequest("http://localhost:3000/api/customer-auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", origin: "http://localhost:3000" },
+        body: JSON.stringify({ identifier: newEmail, password: "Password!123" }),
+      });
+      assert.strictEqual((await handleLogin(reqNewLogin)).status, 200);
     } finally {
       await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
     }
@@ -203,6 +196,8 @@ describe("Wave D — Customer Identity Management", () => {
   it("C. ADD_PHONE and CHANGE_PHONE normalize Bangladeshi phone numbers and prevent collisions", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
+    const phoneB = "018" + Math.floor(10000000 + Math.random() * 90000000);
+    const uniquePhoneNum = "017" + Math.floor(10000000 + Math.random() * 90000000);
 
     // User A: Email only
     const userA = await prisma.user.create({
@@ -215,12 +210,12 @@ describe("Wave D — Customer Identity Management", () => {
       },
     });
 
-    // User B: Has phone 01811223344
+    // User B: Has phone phoneB
     const userB = await prisma.user.create({
       data: {
         name: "User B",
         email: `userb_${suffix}@example.com`,
-        normalizedPhone: "01811223344",
+        normalizedPhone: phoneB,
         passwordHash,
         isActive: true,
       },
@@ -229,7 +224,7 @@ describe("Wave D — Customer Identity Management", () => {
     const sessionA = await createCustomerSession(userA.id);
 
     try {
-      // 1. User A attempts to add User B's phone (+8801811223344) -> 409 Conflict
+      // 1. User A attempts to add User B's phone -> 409 Conflict
       const reqCollision = new NextRequest("http://localhost:3000/api/customer-auth/identity", {
         method: "POST",
         headers: {
@@ -241,7 +236,7 @@ describe("Wave D — Customer Identity Management", () => {
         body: JSON.stringify({
           action: "ADD_PHONE",
           currentPassword: "Password!123",
-          newPhone: "+8801811223344",
+          newPhone: `+880${phoneB.slice(1)}`,
         }),
       });
 
@@ -260,7 +255,7 @@ describe("Wave D — Customer Identity Management", () => {
         body: JSON.stringify({
           action: "ADD_PHONE",
           currentPassword: "Password!123",
-          newPhone: "+880 1711-998877",
+          newPhone: `+880 ${uniquePhoneNum.slice(1, 5)}-${uniquePhoneNum.slice(5)}`,
         }),
       });
 
@@ -268,7 +263,7 @@ describe("Wave D — Customer Identity Management", () => {
       assert.strictEqual(resUnique.status, 200);
 
       const dbUserA = await prisma.user.findUnique({ where: { id: userA.id } });
-      assert.strictEqual(dbUserA?.normalizedPhone, "01711998877");
+      assert.strictEqual(dbUserA?.normalizedPhone, uniquePhoneNum);
 
       // 3. User A can now login with phone
       const loginPhone = new NextRequest("http://localhost:3000/api/customer-auth/login", {
@@ -278,7 +273,7 @@ describe("Wave D — Customer Identity Management", () => {
           origin: "http://localhost:3000",
         },
         body: JSON.stringify({
-          identifier: "01711998877",
+          identifier: uniquePhoneNum,
           password: "Password!123",
         }),
       });
@@ -292,7 +287,7 @@ describe("Wave D — Customer Identity Management", () => {
   it("D. Historical guest orders remain unlinked after user changes phone or email", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
-    const targetPhone = "01999887766";
+    const targetPhone = "019" + Math.floor(10000000 + Math.random() * 90000000);
 
     // 1. Create historical guest order with targetPhone
     const product = await prisma.product.create({

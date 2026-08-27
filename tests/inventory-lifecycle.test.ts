@@ -59,18 +59,18 @@ test("Task 7 — Non-Variant Cancellation Restores Product Stock Once", async ()
   };
 
   const result = await releaseOrderReservation(mockTx, "order_1", {
-    releaseReason: "CUSTOMER_CANCELLED",
+    releaseReason: "CANCELLED",
   });
 
   assert.strictEqual(result.releasedCount, 1);
   assert.strictEqual(productStock, 12, "Product stock must be incremented by 2");
   assert.strictEqual(reservationStatus, "RELEASED");
   assert.ok((releasedAt as unknown) instanceof Date);
-  assert.strictEqual(releaseReason, "CUSTOMER_CANCELLED");
+  assert.strictEqual(releaseReason, "CANCELLED");
 
   // Sequential duplicate cancellation attempt must not increment stock again
   const secondResult = await releaseOrderReservation(mockTx, "order_1", {
-    releaseReason: "CUSTOMER_CANCELLED",
+    releaseReason: "CANCELLED",
   });
   assert.strictEqual(secondResult.releasedCount, 0);
   assert.strictEqual(productStock, 12, "Product stock must NOT be incremented on duplicate cancel");
@@ -120,7 +120,7 @@ test("Task 7 — Variant Cancellation Restores Variant Stock AND Product Aggrega
   };
 
   const result = await releaseOrderReservation(mockTx, "order_var_1", {
-    releaseReason: "CUSTOMER_CANCELLED",
+    releaseReason: "CANCELLED",
   });
 
   assert.strictEqual(result.releasedCount, 1);
@@ -156,7 +156,7 @@ test("Task 7 — Missing Exact Variant Fails Closed Without Falling Back to Vari
   await assert.rejects(
     async () => {
       await releaseOrderReservation(mockTx, "order_missing_var", {
-        releaseReason: "CUSTOMER_CANCELLED",
+        releaseReason: "CANCELLED",
       });
     },
     (err: any) => {

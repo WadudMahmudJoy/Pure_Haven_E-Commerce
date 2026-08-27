@@ -14,6 +14,7 @@
  * 10. User A orders are completely isolated from User B.
  */
 
+import "dotenv/config";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
@@ -222,7 +223,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       data: {
         name: "User A",
         email: `usera_${suffix}@example.com`,
-        normalizedPhone: "01711990011",
+        normalizedPhone: randomPhone(),
         passwordHash,
         isActive: true,
       },
@@ -232,7 +233,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       data: {
         name: "User B (Victim)",
         email: `userb_${suffix}@example.com`,
-        normalizedPhone: "01711990022",
+        normalizedPhone: randomPhone(),
         passwordHash,
         isActive: true,
       },
@@ -377,11 +378,12 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
 
+    const phone = randomPhone();
     const user = await prisma.user.create({
       data: {
         name: "Retry User",
         email: `retry_user_${suffix}@example.com`,
-        normalizedPhone: "01711889900",
+        normalizedPhone: phone,
         passwordHash,
         isActive: true,
       },
@@ -405,7 +407,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       const payload = {
         submissionToken,
         customerName: "Retry User",
-        customerPhone: "01711889900",
+        customerPhone: phone,
         customerCity: "Dhaka",
         customerAddress: "Mirpur 10",
         paymentMethod: "Cash on Delivery",
@@ -460,7 +462,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       data: {
         name: "Original Owner A",
         email: `owner_a_${suffix}@example.com`,
-        normalizedPhone: "01711776655",
+        normalizedPhone: randomPhone(),
         passwordHash,
         isActive: true,
       },
@@ -470,7 +472,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       data: {
         name: "Replay Attacker B",
         email: `attacker_b_${suffix}@example.com`,
-        normalizedPhone: "01711776644",
+        normalizedPhone: randomPhone(),
         passwordHash,
         isActive: true,
       },
@@ -559,11 +561,12 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
 
+    const phoneA = randomPhone();
     const userA = await prisma.user.create({
       data: {
         name: "Owner A",
         email: `owner_a_${suffix}@example.com`,
-        normalizedPhone: "01711778899",
+        normalizedPhone: phoneA,
         passwordHash,
         isActive: true,
       },
@@ -588,7 +591,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       const payloadA = {
         submissionToken,
         customerName: "Owner A",
-        customerPhone: "01711778899",
+        customerPhone: phoneA,
         customerCity: "Dhaka",
         customerAddress: "Banani",
         paymentMethod: "Cash on Delivery",
@@ -653,7 +656,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       data: {
         name: "User A",
         email: `user_a_${suffix}@example.com`,
-        normalizedPhone: "01711665544",
+        normalizedPhone: randomPhone(),
         passwordHash,
         isActive: true,
       },

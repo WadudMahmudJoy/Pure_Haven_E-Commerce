@@ -97,11 +97,11 @@ test("Schema Foundation — InventoryReservation Model Contract", () => {
   assert.match(resModel, /productId\s+Int/);
   assert.match(resModel, /variantId\s+Int\?/);
   assert.match(resModel, /quantity\s+Int/);
-  assert.match(resModel, /status\s+String/);
+  assert.match(resModel, /status\s+(?:String|ReservationStatus)/);
   assert.match(resModel, /reservedAt\s+DateTime\s+@default\(now\(\)\)/);
   assert.match(resModel, /evidenceDeadlineAt\s+DateTime\?/);
   assert.match(resModel, /releasedAt\s+DateTime\?/);
-  assert.match(resModel, /releaseReason\s+String\?/);
+  assert.match(resModel, /releaseReason\s+(?:String|ReservationReleaseReason)\?/);
   assert.match(resModel, /fulfilledAt\s+DateTime\?/);
   assert.match(resModel, /createdAt\s+DateTime\s+@default\(now\(\)\)/);
   assert.match(resModel, /updatedAt\s+DateTime\s+@updatedAt/);
@@ -128,7 +128,7 @@ test("Schema Foundation — PaymentRecord Model Contract", () => {
   assert.match(payModel, /id\s+Int\s+@id\s+@default\(autoincrement\(\)\)/);
   assert.match(payModel, /orderId\s+String\s+@unique/);
   assert.match(payModel, /method\s+String/);
-  assert.match(payModel, /state\s+String/);
+  assert.match(payModel, /state\s+(?:String|PaymentState)/);
   assert.match(payModel, /provider\s+String\?/);
   assert.match(payModel, /verifiedAt\s+DateTime\?/);
   assert.match(payModel, /verifiedBy\s+String\?/);
@@ -142,7 +142,7 @@ test("Schema Foundation — PaymentRecord Model Contract", () => {
   assert.match(payModel, /refundNote\s+String\?/);
 
   // COD Settlement Metadata
-  assert.match(payModel, /codSettlementState\s+String\?/);
+  assert.match(payModel, /codSettlementState\s+(?:String|CodSettlementState)\?/);
   assert.match(payModel, /codSettledAt\s+DateTime\?/);
   assert.match(payModel, /codSettlementNote\s+String\?/);
 
@@ -186,7 +186,7 @@ test("Schema Foundation — PaymentEvidenceAttempt Model Contract", () => {
     "PaymentEvidenceAttempt must use normalizedTrxId for anti-replay identity"
   );
   assert.match(attemptModel, /submittedAt\s+DateTime\s+@default\(now\(\)\)/);
-  assert.match(attemptModel, /state\s+String/);
+  assert.match(attemptModel, /state\s+(?:String|EvidenceAttemptState)/);
   assert.match(attemptModel, /verifiedAt\s+DateTime\?/);
   assert.match(attemptModel, /verifiedBy\s+String\?/);
   assert.match(attemptModel, /rejectionNote\s+String\?/);
@@ -209,7 +209,7 @@ test("Schema Foundation — ReturnItem Model Contract", () => {
   assert.match(returnModel, /productId\s+Int\?/);
   assert.match(returnModel, /variantId\s+Int\?/);
   assert.match(returnModel, /quantity\s+Int/);
-  assert.match(returnModel, /disposition\s+String/);
+  assert.match(returnModel, /disposition\s+(?:String|ReturnDisposition)/);
 
   // physicalReturnAt must be nullable DateTime? without default
   assert.match(

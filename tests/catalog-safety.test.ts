@@ -13,6 +13,7 @@
  *   npx tsx --test tests/catalog-safety.test.ts
  */
 
+import "dotenv/config";
 import { describe, it, afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
@@ -80,6 +81,10 @@ it("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB 
 
   (prisma.$transaction as any) = async (callback: any) => {
     const mockTx: any = {
+      category: {
+        findFirst: async () => ({ id: 1, name: "Lips", slug: "lips" }),
+        findUnique: async () => ({ id: 1, name: "Lips", slug: "lips" }),
+      },
       productVariant: {
         findMany: async () => [
           { id: 101, productId: 10, label: "Red", price: 500, stock: 15 },
@@ -430,9 +435,13 @@ it("Task 9 — DELETE /api/products Permits Deletion When Only RELEASED Reservat
 
 it("Task 9 — POST /api/products Normalizes Prices and Rejects Non-Finite Prices", async () => {
   const originalProductCreate = prisma.product.create;
+  const originalCategoryFindFirst = prisma.category.findFirst;
   test.after(() => {
     prisma.product.create = originalProductCreate;
+    prisma.category.findFirst = originalCategoryFindFirst;
   });
+
+  (prisma.category.findFirst as any) = async () => ({ id: 1, name: "Skincare", slug: "skincare" });
 
   let createdProductData: any = null;
   (prisma.product.create as any) = async (args: any) => {
