@@ -448,6 +448,8 @@ model User {
   orders          Order[]
   sessions        CustomerSession[]
   authTokens      CustomerAuthToken[]
+
+  @@index([isActive])
 }
 
 model CustomerSession {
