@@ -26,9 +26,9 @@ function mapOrder(order: {
   customerPhone: string;
   customerCity: string;
   customerAddress: string;
-  subtotal: number;
-  deliveryFee: number;
-  total: number;
+  subtotal: unknown;
+  deliveryFee: unknown;
+  total: unknown;
   status: string;
   paymentMethod: string;
   paymentStatus: string;
@@ -44,8 +44,8 @@ function mapOrder(order: {
     variantId?: number | null;
     variantLabel?: string | null;
     name: string;
-    price: number;
-    compareAtPrice?: number | null;
+    price: unknown;
+    compareAtPrice?: unknown;
     image: string;
     category: string;
     quantity: number;
@@ -67,15 +67,15 @@ function mapOrder(order: {
       variantId: item.variantId ?? null,
       variantLabel: item.variantLabel ?? null,
       name: item.name,
-      price: item.price,
-      compareAtPrice: item.compareAtPrice ?? null,
+      price: Number(item.price),
+      compareAtPrice: item.compareAtPrice != null ? Number(item.compareAtPrice) : null,
       image: item.image,
       category: item.category,
       quantity: item.quantity,
     })),
-    subtotal: order.subtotal,
-    deliveryFee: order.deliveryFee,
-    total: order.total,
+    subtotal: Number(order.subtotal),
+    deliveryFee: Number(order.deliveryFee),
+    total: Number(order.total),
     status: order.status,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,

@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/adminSession";
+import { prisma } from "@/lib/prisma";
+import { PromoKind } from "@/generated/prisma/client";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function publicCacheHeaders(seconds = 300) {
   return {
     "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}`,
   };
 }
-import { requireAdmin } from "@/lib/adminSession";
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-type PromoKind = "slider" | "wide" | "small";
-
-type HomePromo = {
+type HomePromoDTO = {
   id: string;
   kind: PromoKind;
   label: string;
@@ -26,90 +24,14 @@ type HomePromo = {
   sortOrder: number;
 };
 
-const filePath = path.join(process.cwd(), "data", "home-promos.json");
-
-const seedData: HomePromo[] = [
-  {
-    id: "slide-1",
-    kind: "slider",
-    label: "New Arrivals",
-    title: "Fresh Beauty Collection",
-    subtitle: "Explore cosmetics, skincare, haircare, and daily essentials.",
-    image: "/images/categories/cosmetics.jpg",
-    href: "/shop",
-    isActive: true,
-    sortOrder: 1
-  },
-  {
-    id: "wide-1",
-    kind: "wide",
-    label: "Explore Now",
-    title: "Top Picks",
-    subtitle: "",
-    image: "/images/categories/cosmetics.jpg",
-    href: "/shop",
-    isActive: true,
-    sortOrder: 1
-  },
-  {
-    id: "small-1",
-    kind: "small",
-    label: "New Arrivals",
-    title: "New Arrivals",
-    subtitle: "",
-    image: "/images/categories/skincare.jpg",
-    href: "/shop",
-    isActive: true,
-    sortOrder: 1
-  },
-  {
-    id: "small-2",
-    kind: "small",
-    label: "Hot Deals",
-    title: "Hot Deals",
-    subtitle: "",
-    image: "/images/categories/haircare.jpg",
-    href: "/shop",
-    isActive: true,
-    sortOrder: 2
-  }
-];
-
-async function ensureFile() {
-  await mkdir(path.dirname(filePath), { recursive: true });
-
-  try {
-    await readFile(filePath, "utf8");
-  } catch {
-    await writeFile(filePath, JSON.stringify(seedData, null, 2), "utf8");
-  }
-}
-
-async function readItems(): Promise<HomePromo[]> {
-  await ensureFile();
-
-  try {
-    const raw = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : seedData;
-  } catch {
-    return seedData;
-  }
-}
-
-async function writeItems(items: HomePromo[]) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(items, null, 2), "utf8");
-}
-
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
 function cleanKind(value: unknown): PromoKind {
-  return value === "wide" || value === "small" || value === "slider"
-    ? value
-    : "slider";
+  return Object.values(PromoKind).includes(value as PromoKind)
+    ? (value as PromoKind)
+    : PromoKind.slider;
 }
 
 function cleanBool(value: unknown) {
@@ -124,15 +46,26 @@ function cleanNumber(value: unknown) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const kind = searchParams.get("kind");
+    const kind = searchParams.get("kind") as PromoKind | null;
 
-    const items = await readItems();
+    const promos = await prisma.homePromo.findMany({
+      where: kind && Object.values(PromoKind).includes(kind) ? { kind } : undefined,
+      orderBy: { sortOrder: "asc" },
+    });
 
-    const filtered = items
-      .filter((item) => !kind || item.kind === kind)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const items: HomePromoDTO[] = promos.map((p) => ({
+      id: String(p.id),
+      kind: p.kind as PromoKind,
+      label: p.label,
+      title: p.title,
+      subtitle: p.subtitle,
+      image: p.image,
+      href: p.href,
+      isActive: p.isActive,
+      sortOrder: p.sortOrder,
+    }));
 
-    return NextResponse.json({ success: true, items: filtered });
+    return NextResponse.json({ success: true, items });
   } catch (error) {
     return NextResponse.json(
       { success: false, message: error instanceof Error ? error.message : "Failed to load promos." },
@@ -147,8 +80,6 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const items = await readItems();
-
     const kind = cleanKind(body.kind);
 
     const defaults =
@@ -172,20 +103,30 @@ export async function POST(req: Request) {
 
     const sortOrder = cleanNumber(body.sortOrder);
 
-    const item: HomePromo = {
-      id: `promo-${Date.now()}`,
-      kind,
-      label: cleanText(body.label) || defaults.label,
-      title: cleanText(body.title) || defaults.title,
-      subtitle: cleanText(body.subtitle),
-      image: cleanText(body.image) || defaults.image,
-      href: cleanText(body.href) || "/shop",
-      isActive: body.isActive === undefined ? true : cleanBool(body.isActive),
-      sortOrder: sortOrder > 0 ? sortOrder : 1,
-    };
+    const promo = await prisma.homePromo.create({
+      data: {
+        kind,
+        label: cleanText(body.label) || defaults.label,
+        title: cleanText(body.title) || defaults.title,
+        subtitle: cleanText(body.subtitle),
+        image: cleanText(body.image) || defaults.image,
+        href: cleanText(body.href) || "/shop",
+        isActive: body.isActive === undefined ? true : cleanBool(body.isActive),
+        sortOrder: sortOrder > 0 ? sortOrder : 1,
+      },
+    });
 
-    items.push(item);
-    await writeItems(items);
+    const item: HomePromoDTO = {
+      id: String(promo.id),
+      kind: promo.kind as PromoKind,
+      label: promo.label,
+      title: promo.title,
+      subtitle: promo.subtitle,
+      image: promo.image,
+      href: promo.href,
+      isActive: promo.isActive,
+      sortOrder: promo.sortOrder,
+    };
 
     return NextResponse.json({ success: true, item }, { status: 201 });
   } catch (error) {
@@ -205,19 +146,27 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json();
-    const id = cleanText(body.id);
+    const rawId = cleanText(body.id);
+    const numericId = Number(rawId);
 
-    if (!id) {
+    if (!rawId) {
       return NextResponse.json(
         { success: false, message: "Promo id is required." },
         { status: 400 }
       );
     }
 
-    const items = await readItems();
-    const index = items.findIndex((item) => item.id === id);
+    let existing;
+    if (Number.isInteger(numericId) && numericId > 0) {
+      existing = await prisma.homePromo.findUnique({ where: { id: numericId } });
+    }
+    if (!existing) {
+      existing = await prisma.homePromo.findFirst({
+        where: { id: Number.isInteger(numericId) && numericId > 0 ? numericId : undefined },
+      });
+    }
 
-    if (index < 0) {
+    if (!existing) {
       return NextResponse.json(
         { success: false, message: "Promo item not found." },
         { status: 404 }
@@ -247,21 +196,33 @@ export async function PUT(req: Request) {
 
     const sortOrder = cleanNumber(body.sortOrder);
 
-    items[index] = {
-      id,
-      kind,
-      label: cleanText(body.label) || defaults.label,
-      title: cleanText(body.title) || defaults.title,
-      subtitle: cleanText(body.subtitle),
-      image: cleanText(body.image) || items[index].image || defaults.image,
-      href: cleanText(body.href) || "/shop",
-      isActive: body.isActive === undefined ? true : cleanBool(body.isActive),
-      sortOrder: sortOrder > 0 ? sortOrder : 1,
+    const updated = await prisma.homePromo.update({
+      where: { id: existing.id },
+      data: {
+        kind,
+        label: cleanText(body.label) || defaults.label,
+        title: cleanText(body.title) || defaults.title,
+        subtitle: cleanText(body.subtitle),
+        image: cleanText(body.image) || existing.image || defaults.image,
+        href: cleanText(body.href) || "/shop",
+        isActive: body.isActive === undefined ? true : cleanBool(body.isActive),
+        sortOrder: sortOrder > 0 ? sortOrder : 1,
+      },
+    });
+
+    const item: HomePromoDTO = {
+      id: String(updated.id),
+      kind: updated.kind as PromoKind,
+      label: updated.label,
+      title: updated.title,
+      subtitle: updated.subtitle,
+      image: updated.image,
+      href: updated.href,
+      isActive: updated.isActive,
+      sortOrder: updated.sortOrder,
     };
 
-    await writeItems(items);
-
-    return NextResponse.json({ success: true, item: items[index] });
+    return NextResponse.json({ success: true, item });
   } catch (error) {
     return NextResponse.json(
       {
@@ -280,6 +241,7 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
+    const numericId = Number(id);
 
     if (!id) {
       return NextResponse.json(
@@ -288,8 +250,9 @@ export async function DELETE(req: Request) {
       );
     }
 
-    const items = await readItems();
-    await writeItems(items.filter((item) => item.id !== id));
+    if (Number.isInteger(numericId) && numericId > 0) {
+      await prisma.homePromo.delete({ where: { id: numericId } }).catch(() => null);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -299,6 +262,3 @@ export async function DELETE(req: Request) {
     );
   }
 }
-
-
-

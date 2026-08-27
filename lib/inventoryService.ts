@@ -3,7 +3,7 @@
  * Manages atomic guarded stock reservations, conditional updates, and reservation records.
  */
 
-import { PrismaClient } from "@/generated/prisma/client";
+import { PrismaClient, ReservationStatus, ReservationReleaseReason } from "@/generated/prisma/client";
 
 export class InventoryConflictError extends Error {
   code = "INSUFFICIENT_STOCK";
@@ -182,7 +182,15 @@ export async function releaseOrderReservation(
   options?: ReleaseReservationOptions
 ): Promise<ReleaseReservationResult> {
   const now = options?.releasedAt ?? new Date();
-  const reason = options?.releaseReason ?? "ORDER_CANCELLED";
+  const rawReason = options?.releaseReason ?? "CANCELLED";
+  const reason: ReservationReleaseReason =
+    rawReason === "EVIDENCE_DEADLINE_EXPIRED"
+      ? ReservationReleaseReason.EVIDENCE_DEADLINE_EXPIRED
+      : rawReason === "REJECTED_PAYMENT"
+      ? ReservationReleaseReason.REJECTED_PAYMENT
+      : rawReason === "ADMIN_OVERRIDE"
+      ? ReservationReleaseReason.ADMIN_OVERRIDE
+      : ReservationReleaseReason.CANCELLED;
 
   // Query all reservations for this order (both RESERVED and non-RESERVED)
   const allReservations = await tx.inventoryReservation.findMany({
@@ -195,17 +203,17 @@ export async function releaseOrderReservation(
 
   if (allReservations.length > 0) {
     // Modern Order: only active RESERVED reservations are eligible for release
-    const reserved = allReservations.filter((r) => r.status === "RESERVED");
+    const reserved = allReservations.filter((r) => r.status === ReservationStatus.RESERVED);
 
     for (const res of reserved) {
       // Exactly-once DB entitlement claim: only count === 1 owns the restoration!
       const updateResult = await tx.inventoryReservation.updateMany({
         where: {
           id: res.id,
-          status: "RESERVED",
+          status: ReservationStatus.RESERVED,
         },
         data: {
-          status: "RELEASED",
+          status: ReservationStatus.RELEASED,
           releasedAt: now,
           releaseReason: reason,
         },

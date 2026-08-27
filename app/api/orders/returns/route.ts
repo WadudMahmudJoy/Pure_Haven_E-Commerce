@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma, ReturnDisposition } from "@/generated/prisma/client";
 import { requireAdmin } from "@/lib/adminSession";
 
 export const runtime = "nodejs";
@@ -139,7 +139,7 @@ export async function POST(req: Request) {
             productId: orderItem.productId,
             variantId: orderItem.variantId,
             quantity,
-            disposition,
+            disposition: disposition as ReturnDisposition,
             physicalReturnAt: now,
             restockedAt: null, // Physical intake alone never increments sellable stock!
             adminNote: itemInput.adminNote ? String(itemInput.adminNote).trim() : null,

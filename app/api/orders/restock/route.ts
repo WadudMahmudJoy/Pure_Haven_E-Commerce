@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/adminSession";
 import { restockReturnItem } from "@/lib/inventoryService";
+import { ReturnDisposition } from "@/generated/prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
             restockedAt: null,
           },
           data: {
-            disposition: rawDisposition,
+            disposition: rawDisposition as ReturnDisposition,
             ...(adminNote ? { adminNote } : {}),
           },
         });
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
           throw new Error("CONFLICT: Cannot change disposition of an already restocked return item.");
         }
 
-        returnItem.disposition = rawDisposition;
+        returnItem.disposition = rawDisposition as ReturnDisposition;
       }
 
       // Precondition checks for restock execution

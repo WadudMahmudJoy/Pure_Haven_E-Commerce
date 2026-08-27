@@ -1,12 +1,11 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminSession";
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type CustomerMessage = {
+type CustomerMessageDTO = {
   id: string;
   name: string;
   phone: string;
@@ -19,38 +18,11 @@ type CustomerMessage = {
   updatedAt: string;
 };
 
-const filePath = path.join(process.cwd(), "data", "customer-messages.json");
-
-async function ensureFile() {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    await readFile(filePath, "utf8");
-  } catch {
-    await writeFile(filePath, JSON.stringify([], null, 2), "utf8");
-  }
-}
-
-async function readItems(): Promise<CustomerMessage[]> {
-  await ensureFile();
-  try {
-    const raw = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-async function writeItems(items: CustomerMessage[]) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(items, null, 2), "utf8");
-}
-
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function cleanStatus(value: unknown): CustomerMessage["status"] {
+function cleanStatus(value: unknown): "new" | "seen" | "answered" | "closed" {
   return value === "seen" || value === "answered" || value === "closed" || value === "new"
     ? value
     : "new";
@@ -60,13 +32,34 @@ export async function GET(req: Request) {
   const unauthorized = requireAdmin(req);
   if (unauthorized) return unauthorized;
 
-  const items = await readItems();
-  return NextResponse.json({
-    success: true,
-    messages: items.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    ),
-  });
+  try {
+    const items = await prisma.customerMessage.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+
+    const messages: CustomerMessageDTO[] = items.map((m) => ({
+      id: String(m.id),
+      name: m.name,
+      phone: m.phone || "",
+      email: m.email || "",
+      subject: "Customer Query",
+      message: m.message,
+      reply: "",
+      status: cleanStatus(m.status),
+      createdAt: m.createdAt.toISOString(),
+      updatedAt: m.updatedAt.toISOString(),
+    }));
+
+    return NextResponse.json({
+      success: true,
+      messages,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, message: error instanceof Error ? error.message : "Failed to load messages." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
@@ -76,7 +69,6 @@ export async function POST(req: Request) {
     const name = text(body.name);
     const phone = text(body.phone);
     const email = text(body.email);
-    const subject = text(body.subject);
     const message = text(body.message);
 
     if (!name || !phone || !message) {
@@ -86,24 +78,28 @@ export async function POST(req: Request) {
       );
     }
 
-    const now = new Date().toISOString();
+    const created = await prisma.customerMessage.create({
+      data: {
+        name,
+        phone,
+        email: email || null,
+        message,
+        status: "new",
+      },
+    });
 
-    const item: CustomerMessage = {
-      id: `msg-${Date.now()}`,
-      name,
-      phone,
-      email,
-      subject: subject || "Customer Query",
-      message,
+    const item: CustomerMessageDTO = {
+      id: String(created.id),
+      name: created.name,
+      phone: created.phone || "",
+      email: created.email || "",
+      subject: text(body.subject) || "Customer Query",
+      message: created.message,
       reply: "",
       status: "new",
-      createdAt: now,
-      updatedAt: now,
+      createdAt: created.createdAt.toISOString(),
+      updatedAt: created.updatedAt.toISOString(),
     };
-
-    const items = await readItems();
-    items.push(item);
-    await writeItems(items);
 
     return NextResponse.json({ success: true, message: "Message submitted.", item }, { status: 201 });
   } catch (error) {
@@ -120,28 +116,48 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json();
-    const id = text(body.id);
+    const rawId = text(body.id);
+    const numericId = Number(rawId);
 
-    const items = await readItems();
-    const index = items.findIndex((item) => item.id === id);
+    if (!rawId) {
+      return NextResponse.json(
+        { success: false, message: "Message id is required." },
+        { status: 400 }
+      );
+    }
 
-    if (index < 0) {
+    const existing = await prisma.customerMessage.findUnique({
+      where: { id: numericId },
+    });
+
+    if (!existing) {
       return NextResponse.json(
         { success: false, message: "Message not found." },
         { status: 404 }
       );
     }
 
-    items[index] = {
-      ...items[index],
+    const updated = await prisma.customerMessage.update({
+      where: { id: existing.id },
+      data: {
+        status: cleanStatus(body.status),
+      },
+    });
+
+    const item: CustomerMessageDTO = {
+      id: String(updated.id),
+      name: updated.name,
+      phone: updated.phone || "",
+      email: updated.email || "",
+      subject: "Customer Query",
+      message: updated.message,
       reply: text(body.reply),
-      status: cleanStatus(body.status),
-      updatedAt: new Date().toISOString(),
+      status: cleanStatus(updated.status),
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
     };
 
-    await writeItems(items);
-
-    return NextResponse.json({ success: true, message: items[index] });
+    return NextResponse.json({ success: true, message: item });
   } catch (error) {
     return NextResponse.json(
       { success: false, message: error instanceof Error ? error.message : "Failed to update message." },
@@ -154,15 +170,24 @@ export async function DELETE(req: Request) {
   const unauthorized = requireAdmin(req);
   if (unauthorized) return unauthorized;
 
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    const numericId = Number(id);
 
-  if (!id) {
-    return NextResponse.json({ success: false, message: "Message id is required." }, { status: 400 });
+    if (!id || isNaN(numericId)) {
+      return NextResponse.json({ success: false, message: "Valid message id is required." }, { status: 400 });
+    }
+
+    await prisma.customerMessage.delete({
+      where: { id: numericId },
+    }).catch(() => null);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, message: error instanceof Error ? error.message : "Failed to delete message." },
+      { status: 500 }
+    );
   }
-
-  const items = await readItems();
-  await writeItems(items.filter((item) => item.id !== id));
-
-  return NextResponse.json({ success: true });
 }

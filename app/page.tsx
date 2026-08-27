@@ -1,5 +1,3 @@
-import { promises as fs } from "fs";
-import path from "path";
 import TopBar from "@/components/layout/TopBar";
 import Navbar from "@/components/layout/Navbar";
 import HomeHeroSlider from "@/components/home/HomeHeroSlider";
@@ -44,18 +42,6 @@ type FooterSettings = {
   policyLinksText: string;
 };
 
-const dataDir = path.join(process.cwd(), "data");
-
-async function readJsonFile<T>(fileName: string, fallback: T): Promise<T> {
-  try {
-    const filePath = path.join(dataDir, fileName);
-    const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 function activePromosByKind(promos: HomePromo[], kind: string) {
   return promos
     .filter((item) => item.kind === kind && item.isActive)
@@ -63,10 +49,11 @@ function activePromosByKind(promos: HomePromo[], kind: string) {
 }
 
 async function getHomePageData() {
-  const [categoryRows, products, promos, footerSettings] = await Promise.all([
+  const [categoryRows, products, promos, footer] = await Promise.all([
     getCachedCategoryRows(false).catch(() => getDefaultPublicCategories()),
     prisma.product
       .findMany({
+        where: { isActive: true, deletedAt: null },
         orderBy: [{ id: "desc" }],
         select: {
           id: true,
@@ -85,15 +72,70 @@ async function getHomePageData() {
         }))
       )
       .catch(() => []),
-    readJsonFile<HomePromo[]>("home-promos.json", []),
-    readJsonFile<Partial<FooterSettings>>("footer-settings.json", {}),
+    prisma.homePromo
+      .findMany({
+        where: { isActive: true },
+        orderBy: { sortOrder: "asc" },
+      })
+      .then((rows) =>
+        rows.map((p) => ({
+          id: String(p.id),
+          kind: p.kind,
+          label: p.label,
+          title: p.title,
+          subtitle: p.subtitle,
+          image: p.image,
+          href: p.href,
+          isActive: p.isActive,
+          sortOrder: p.sortOrder,
+        }))
+      )
+      .catch(() => []),
+    prisma.footerSettings
+      .findFirst({
+        orderBy: { id: "asc" },
+        include: { links: { orderBy: { sortOrder: "asc" } } },
+      })
+      .catch(() => null),
   ]);
+
+  let footerSettings: Partial<FooterSettings> = {};
+  if (footer) {
+    const quickLinks = footer.links
+      .filter((l) => l.group === "QUICK_LINKS" && l.isActive)
+      .map((l) => `${l.label}|${l.url}`)
+      .join("\n");
+    const categoryLinks = footer.links
+      .filter((l) => l.group === "CATEGORY_LINKS" && l.isActive)
+      .map((l) => `${l.label}|${l.url}`)
+      .join("\n");
+    const policyLinks = footer.links
+      .filter((l) => l.group === "POLICY_LINKS" && l.isActive)
+      .map((l) => `${l.label}|${l.url}`)
+      .join("\n");
+
+    footerSettings = {
+      brandTitle: footer.brandTitle,
+      brandSubtitle: footer.brandSubtitle,
+      description: footer.description,
+      address: footer.address,
+      phone: footer.phone,
+      email: footer.email,
+      facebookUrl: footer.facebookUrl,
+      instagramUrl: footer.instagramUrl,
+      paymentNote: footer.paymentNote,
+      copyright: footer.copyright,
+      quickLinksText: quickLinks,
+      categoryLinksText: categoryLinks,
+      policyLinksText: policyLinks,
+    };
+  }
 
   return {
     categories: categoryRows,
     products,
-    sliderPromos: activePromosByKind(Array.isArray(promos) ? promos : [], "slider"),
-    widePromo: activePromosByKind(Array.isArray(promos) ? promos : [], "wide")[0] ?? null,
+    sliderPromos: activePromosByKind(promos, "slider"),
+    widePromo: activePromosByKind(promos, "wide")[0] ?? null,
     footerSettings,
   };
 }

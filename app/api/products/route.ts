@@ -134,13 +134,51 @@ export async function POST(req: Request) {
         ? variants.reduce((sum, item) => sum + item.stock, 0)
         : safeStock(body.stock);
 
+    let categoryId: number | null = null;
+    let resolvedCategoryName = category;
+
+    if (body.categoryId !== undefined && body.categoryId !== null && body.categoryId !== "") {
+      const parsedCatId = Number(body.categoryId);
+      if (!Number.isInteger(parsedCatId) || parsedCatId <= 0) {
+        return NextResponse.json(
+          { success: false, message: "Invalid categoryId provided." },
+          { status: 400 }
+        );
+      }
+      const matchedCategory = await prisma.category.findUnique({
+        where: { id: parsedCatId },
+      });
+      if (!matchedCategory) {
+        return NextResponse.json(
+          { success: false, message: `Category with ID ${parsedCatId} not found.` },
+          { status: 400 }
+        );
+      }
+      categoryId = matchedCategory.id;
+      resolvedCategoryName = matchedCategory.name;
+    } else {
+      const matchedCategory = await prisma.category.findFirst({
+        where: {
+          OR: [
+            { slug: { equals: category, mode: "insensitive" } },
+            { name: { equals: category, mode: "insensitive" } },
+          ],
+        },
+      });
+      if (matchedCategory) {
+        categoryId = matchedCategory.id;
+        resolvedCategoryName = matchedCategory.name;
+      }
+    }
+
     const product = await prisma.product.create({
       data: {
         name,
         price,
         compareAtPrice,
         image,
-        category,
+        category: resolvedCategoryName,
+        categoryId,
         subcategory: optionalText(body.subcategory),
         description: optionalText(body.description),
         stock: initialStock,
@@ -148,7 +186,14 @@ export async function POST(req: Request) {
         isUpcoming: boolValue(body.isUpcoming),
         badgeText: optionalText(body.badgeText),
         badgeTone: badgeToneValue(body.badgeTone),
-        variants: variants.length > 0 ? { create: variants } : undefined,
+        variants: {
+          create: variants.map((item) => ({
+            label: item.label,
+            price: item.price,
+            stock: item.stock,
+            image: item.image,
+          })),
+        },
       },
       include: { variants: { orderBy: { id: "asc" } } },
     });
@@ -313,6 +358,37 @@ export async function PUT(req: Request) {
         finalProductStock = currentVariants.reduce((sum, v) => sum + v.stock, 0);
       }
 
+      let categoryId: number | null = null;
+      let resolvedCategoryName = category;
+
+      if (body.categoryId !== undefined && body.categoryId !== null && body.categoryId !== "") {
+        const parsedCatId = Number(body.categoryId);
+        if (!Number.isInteger(parsedCatId) || parsedCatId <= 0) {
+          throw new Error("INVALID_CATEGORY_ID: Invalid categoryId provided.");
+        }
+        const matchedCategory = await tx.category.findUnique({
+          where: { id: parsedCatId },
+        });
+        if (!matchedCategory) {
+          throw new Error(`INVALID_CATEGORY_ID: Category with ID ${parsedCatId} not found.`);
+        }
+        categoryId = matchedCategory.id;
+        resolvedCategoryName = matchedCategory.name;
+      } else {
+        const matchedCategory = await tx.category.findFirst({
+          where: {
+            OR: [
+              { slug: { equals: category, mode: "insensitive" } },
+              { name: { equals: category, mode: "insensitive" } },
+            ],
+          },
+        });
+        if (matchedCategory) {
+          categoryId = matchedCategory.id;
+          resolvedCategoryName = matchedCategory.name;
+        }
+      }
+
       const updatedProduct = await tx.product.update({
         where: { id },
         data: {
@@ -320,7 +396,8 @@ export async function PUT(req: Request) {
           price,
           compareAtPrice,
           image,
-          category,
+          category: resolvedCategoryName,
+          categoryId,
           subcategory: optionalText(body.subcategory),
           description: optionalText(body.description),
           stock: hasAnyVariants ? finalProductStock : undefined, // Preserve existing stock if non-variant
@@ -469,8 +546,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    // Check for active or return-bearing fulfilled reservations
-    // Wave E Note: Unresolved ReturnItem rows in Wave E will build on this exact catalog identity retention.
+    // 1. Check for active or return-bearing fulfilled reservations
     const activeReservationCount = await prisma.inventoryReservation.count({
       where: {
         productId: id,
@@ -489,10 +565,40 @@ export async function DELETE(req: Request) {
       );
     }
 
+    // 2. Check for historical order items
+    let hasHistoricalOrder = false;
+    try {
+      if (prisma.orderItem?.count) {
+        const count = await prisma.orderItem.count({ where: { productId: id } });
+        if (count > 0) hasHistoricalOrder = true;
+      }
+    } catch {}
+
+    if (hasHistoricalOrder) {
+      // D6: Soft delete to preserve historical commerce integrity
+      await prisma.$transaction([
+        prisma.product.update({
+          where: { id },
+          data: {
+            isActive: false,
+            deletedAt: new Date(),
+          },
+        }),
+        prisma.productVariant.updateMany({
+          where: { productId: id },
+          data: { isActive: false },
+        }),
+      ]);
+
+      invalidateProductReadCache();
+      return NextResponse.json({ success: true, softDeleted: true });
+    }
+
+    // 3. No historical references -> safe hard delete
     await prisma.product.delete({ where: { id } });
     invalidateProductReadCache();
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, softDeleted: false });
   } catch (error) {
     console.error("DELETE /api/products failed:", error);
 

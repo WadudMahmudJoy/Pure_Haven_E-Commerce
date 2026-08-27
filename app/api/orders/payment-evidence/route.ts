@@ -5,6 +5,7 @@ import { consumeRateLimit } from "@/lib/rateLimit";
 import {
   getRateLimitClientKey,
 } from "@/lib/rateLimitPolicy";
+import { PaymentState, EvidenceAttemptState } from "@/generated/prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -213,9 +214,9 @@ export async function POST(req: Request) {
     // WHERE state IN ('PENDING_REVIEW','ACCEPTED') remains final anti-replay
     // authority and is preserved below.
     // -----------------------------------------------------------------------
-    const currentPrState = order.paymentRecord?.state ?? "AWAITING_PAYMENT";
-    const expectedSourceState: string =
-      currentPrState === "REJECTED" ? "REJECTED" : "AWAITING_PAYMENT";
+    const currentPrState = order.paymentRecord?.state ?? PaymentState.AWAITING_PAYMENT;
+    const expectedSourceState: PaymentState =
+      currentPrState === PaymentState.REJECTED ? PaymentState.REJECTED : PaymentState.AWAITING_PAYMENT;
 
     try {
       const result = await prisma.$transaction(async (tx) => {

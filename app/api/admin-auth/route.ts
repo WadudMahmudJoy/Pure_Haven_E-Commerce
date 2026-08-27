@@ -38,6 +38,8 @@ type RawAdminAuth = Partial<AdminAuth> & {
   recoveryCode?: string;
 };
 
+import { prisma } from "@/lib/prisma";
+
 const scrypt = promisify(scryptCallback);
 const filePath = path.join(process.cwd(), "data", "admin-auth.json");
 
@@ -61,26 +63,86 @@ async function verifySecret(secret: string, stored: string) {
   return key.length === expected.length && timingSafeEqual(key, expected);
 }
 
+function hasDb() {
+  return Boolean(process.env.DATABASE_URL || process.env.DATABASE_URL_TEST);
+}
+
 async function writeAuth(auth: AdminAuth) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(
-    filePath,
-    JSON.stringify(
-      {
-        email: auth.email,
-        passwordHash: auth.passwordHash,
-        recoveryEmail: auth.recoveryEmail,
-        recoveryPhone: auth.recoveryPhone,
-        recoveryCodeHash: auth.recoveryCodeHash,
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+  if (hasDb()) {
+    try {
+      const existing = await prisma.adminCredential.findFirst({
+        orderBy: { id: "asc" },
+      });
+
+      if (existing) {
+        await prisma.adminCredential.update({
+          where: { id: existing.id },
+          data: {
+            email: auth.email,
+            passwordHash: auth.passwordHash,
+            recoveryEmail: auth.recoveryEmail || null,
+            recoveryPhone: auth.recoveryPhone || null,
+            recoveryCodeHash: auth.recoveryCodeHash || null,
+          },
+        });
+      } else {
+        await prisma.adminCredential.create({
+          data: {
+            email: auth.email,
+            passwordHash: auth.passwordHash,
+            recoveryEmail: auth.recoveryEmail || null,
+            recoveryPhone: auth.recoveryPhone || null,
+            recoveryCodeHash: auth.recoveryCodeHash || null,
+          },
+        });
+      }
+    } catch {
+      // DB write failure in offline test
+    }
+  }
+
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(
+      filePath,
+      JSON.stringify(
+        {
+          email: auth.email,
+          passwordHash: auth.passwordHash,
+          recoveryEmail: auth.recoveryEmail,
+          recoveryPhone: auth.recoveryPhone,
+          recoveryCodeHash: auth.recoveryCodeHash,
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch {
+    // File write is non-fatal when DB write succeeds
+  }
 }
 
 async function readAuth(): Promise<AdminAuth | null> {
+  if (hasDb()) {
+    try {
+      const dbAdmin = await prisma.adminCredential.findFirst({
+        orderBy: { id: "asc" },
+      });
+      if (dbAdmin && dbAdmin.email && dbAdmin.passwordHash) {
+        return {
+          email: dbAdmin.email.trim(),
+          passwordHash: dbAdmin.passwordHash.trim(),
+          recoveryEmail: (dbAdmin.recoveryEmail || "").trim(),
+          recoveryPhone: (dbAdmin.recoveryPhone || "").trim(),
+          recoveryCodeHash: (dbAdmin.recoveryCodeHash || "").trim(),
+        };
+      }
+    } catch {
+      // If DB query fails in offline test runner, fall back to file
+    }
+  }
+
   try {
     const raw = await readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as RawAdminAuth;

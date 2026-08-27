@@ -7,6 +7,10 @@ import {
 export async function getCachedProductListRows() {
   return withServerReadCache("products:rows:list:light", () =>
     prisma.product.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+      },
       orderBy: [{ id: "desc" }],
       select: {
         id: true,
@@ -15,6 +19,7 @@ export async function getCachedProductListRows() {
         compareAtPrice: true,
         image: true,
         category: true,
+        categoryId: true,
         subcategory: true,
         description: true,
         stock: true,
@@ -31,9 +36,14 @@ export async function getCachedProductListRows() {
 export async function getCachedProductRows() {
   return withServerReadCache("products:rows:list", () =>
     prisma.product.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+      },
       orderBy: [{ id: "desc" }],
       include: {
         variants: {
+          where: { isActive: true },
           orderBy: { id: "asc" },
         },
       },
@@ -43,10 +53,15 @@ export async function getCachedProductRows() {
 
 export async function getCachedProductRow(id: number) {
   return withServerReadCache(`products:rows:id:${id}`, () =>
-    prisma.product.findUnique({
-      where: { id },
+    prisma.product.findFirst({
+      where: {
+        id,
+        isActive: true,
+        deletedAt: null,
+      },
       include: {
         variants: {
+          where: { isActive: true },
           orderBy: { id: "asc" },
         },
       },

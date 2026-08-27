@@ -7,13 +7,118 @@ datasource db {
   provider = "postgresql"
 }
 
+model AdminCredential {
+  id               Int      @id @default(autoincrement())
+  email            String   @unique
+  passwordHash     String
+  recoveryEmail    String?
+  recoveryPhone    String?
+  recoveryCodeHash String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model SiteBranding {
+  id           Int      @id @default(autoincrement())
+  singletonKey String   @unique @default("PRIMARY")
+  siteName     String   @default("PURE")
+  siteSubtitle String   @default("HAVEN BD")
+  logoUrl      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum FooterLinkGroup {
+  QUICK_LINKS
+  CATEGORY_LINKS
+  POLICY_LINKS
+}
+
+model FooterSettings {
+  id            Int          @id @default(autoincrement())
+  singletonKey  String       @unique @default("PRIMARY")
+  brandTitle    String       @default("PURE")
+  brandSubtitle String       @default("HAVEN BD")
+  description   String       @default("")
+  address       String       @default("")
+  phone         String       @default("")
+  email         String       @default("")
+  facebookUrl   String       @default("#")
+  instagramUrl  String       @default("#")
+  paymentNote   String       @default("")
+  copyright     String       @default("")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  links         FooterLink[]
+}
+
+model FooterLink {
+  id               Int             @id @default(autoincrement())
+  footerSettingsId Int
+  group            FooterLinkGroup
+  label            String
+  url              String
+  sortOrder        Int             @default(0)
+  isActive         Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  footerSettings FooterSettings @relation(fields: [footerSettingsId], references: [id], onDelete: Cascade)
+
+  @@index([footerSettingsId, group, sortOrder])
+}
+
+enum PromoKind {
+  slider
+  wide
+  small
+}
+
+model HomePromo {
+  id        Int       @id @default(autoincrement())
+  kind      PromoKind @default(slider)
+  label     String
+  title     String
+  subtitle  String    @default("")
+  image     String
+  href      String    @default("/shop")
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+enum CustomerMessageStatus {
+  new
+  seen
+  answered
+  closed
+}
+
+model CustomerMessage {
+  id        Int                   @id @default(autoincrement())
+  name      String
+  phone     String?
+  email     String?
+  message   String
+  status    CustomerMessageStatus @default(new)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
 model Product {
   id             Int              @id @default(autoincrement())
   name           String
-  price          Float
-  compareAtPrice Float?
+  price          Decimal          @db.Decimal(12, 2)
+  compareAtPrice Decimal?         @db.Decimal(12, 2)
   image          String
   category       String
+  categoryId     Int?
   subcategory    String?
   description    String?
   stock          Int              @default(0)
@@ -21,74 +126,116 @@ model Product {
   isUpcoming     Boolean          @default(false)
   badgeText      String?
   badgeTone      String           @default("sale")
+  isActive       Boolean          @default(true)
+  deletedAt      DateTime?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+  categoryRel    Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   variants       ProductVariant[]
+
+  @@index([isActive, deletedAt])
+  @@index([categoryId])
 }
 
 model ProductVariant {
-  id        Int     @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   productId Int
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  label String
-  price Float
-  stock Int     @default(0)
-  image String?
-
-  isHotDeal  Boolean @default(false)
-  isUpcoming Boolean @default(false)
+  label      String
+  price      Decimal  @db.Decimal(12, 2)
+  stock      Int      @default(0)
+  image      String?
+  isActive   Boolean  @default(true)
+  isHotDeal  Boolean  @default(false)
+  isUpcoming Boolean  @default(false)
   badgeTone  String?
-  sortOrder  Int     @default(0)
+  sortOrder  Int      @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([productId, isActive])
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  processing
+  shipped
+  out_for_delivery
+  delivered
+  cancelled
+  delivery_failed
+  return_in_transit
+  return_received
+}
+
+enum CancellationReason {
+  customer_requested
+  customer_unreachable
+  invalid_contact
+  suspected_fake_order
+  merchant_stockout
+  merchant_error
+  system_timeout
+  other
+}
+
+enum DeliveryFailureReason {
+  customer_unreachable
+  customer_refused
+  invalid_address
+  courier_failure
+  courier_damage
+  other
 }
 
 model Order {
-  id                    String         @id @default(cuid())
-  orderId               String         @unique
-  submissionToken       String?        @unique
+  id                    String                 @id @default(cuid())
+  orderId               String                 @unique
+  submissionToken       String?                @unique
   customerName          String
   customerPhone         String
   customerCity          String
   customerAddress       String
-  subtotal              Float
-  deliveryFee           Float
-  total                 Float
-  status                String         @default("pending")
-  paymentMethod         String         @default("Cash on Delivery")
-  paymentStatus         String         @default("pending")
+  subtotal              Decimal                @db.Decimal(12, 2)
+  deliveryFee           Decimal                @db.Decimal(12, 2)
+  total                 Decimal                @db.Decimal(12, 2)
+  status                OrderStatus            @default(pending)
+  paymentMethod         String                 @default("Cash on Delivery")
+  paymentStatus         String                 @default("pending")
   paymentProvider       String?
   paymentSenderNumber   String?
   paymentTrxId          String?
   cancelledBy           String?
-  cancellationReason    String?
+  cancellationReason    CancellationReason?
   cancellationNote      String?
   cancelledAt           DateTime?
-  deliveryFailureReason String?
+  deliveryFailureReason DeliveryFailureReason?
   deliveryFailureNote   String?
   deliveryFailedAt      DateTime?
   userId                String?
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
   items                 OrderItem[]
   paymentRecord         PaymentRecord?
-  user                  User?          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user                  User?                  @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
+  @@index([status])
+  @@index([createdAt])
 }
 
-
 model OrderItem {
-  id             Int     @id @default(autoincrement())
+  id             Int      @id @default(autoincrement())
   orderId        String
   productId      Int?
   variantId      Int?
   variantLabel   String?
   name           String
-  price          Float
-  compareAtPrice Float?
+  price          Decimal  @db.Decimal(12, 2)
+  compareAtPrice Decimal? @db.Decimal(12, 2)
   image          String
   category       String
   quantity       Int
@@ -96,23 +243,38 @@ model OrderItem {
   order       Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
   reservation InventoryReservation?
   returnItems ReturnItem[]
+
+  @@index([orderId])
+}
+
+enum ReservationStatus {
+  RESERVED
+  RELEASED
+  FULFILLED
+}
+
+enum ReservationReleaseReason {
+  CANCELLED
+  EVIDENCE_DEADLINE_EXPIRED
+  REJECTED_PAYMENT
+  ADMIN_OVERRIDE
 }
 
 model InventoryReservation {
-  id                 Int       @id @default(autoincrement())
-  orderItemId        Int       @unique
+  id                 Int                       @id @default(autoincrement())
+  orderItemId        Int                       @unique
   orderId            String
   productId          Int
   variantId          Int?
   quantity           Int
-  status             String // RESERVED | RELEASED | FULFILLED
-  reservedAt         DateTime  @default(now())
+  status             ReservationStatus
+  reservedAt         DateTime                  @default(now())
   evidenceDeadlineAt DateTime?
   releasedAt         DateTime?
-  releaseReason      String? // CANCELLED | EVIDENCE_DEADLINE_EXPIRED | REJECTED_PAYMENT | ADMIN_OVERRIDE
+  releaseReason      ReservationReleaseReason?
   fulfilledAt        DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 
@@ -120,27 +282,46 @@ model InventoryReservation {
   @@index([productId])
   @@index([variantId])
   @@index([status])
+  @@index([evidenceDeadlineAt])
+}
+
+enum PaymentState {
+  AWAITING_PAYMENT
+  VERIFICATION_PENDING
+  PAID
+  REJECTED
+  FAILED
+  REFUND_REQUIRED
+  REFUND_PROCESSING
+  REFUNDED
+}
+
+enum CodSettlementState {
+  NOT_APPLICABLE
+  PENDING
+  SETTLED
+  DISPUTED
 }
 
 model PaymentRecord {
-  id            Int       @id @default(autoincrement())
-  orderId       String    @unique
+  id            Int                 @id @default(autoincrement())
+  orderId       String              @unique
   method        String // Cash on Delivery | bKash | Nagad
-  state         String // AWAITING_PAYMENT | VERIFICATION_PENDING | PAID | REJECTED | FAILED | REFUND_REQUIRED | REFUND_PROCESSING | REFUNDED
+  state         PaymentState // Canonical state machine
   provider      String? // bKash | Nagad
   verifiedAt    DateTime?
   verifiedBy    String?
   rejectionNote String?
 
   // Refund Metadata (State truth is PaymentRecord.state)
-  refundAmount       Float?
+  refundAmount       Decimal?            @db.Decimal(12, 2)
   refundRequiredAt   DateTime?
   refundProcessingAt DateTime?
   refundedAt         DateTime?
   refundNote         String?
 
   // COD Settlement Domain (Independent Lifecycle)
-  codSettlementState String? // NOT_APPLICABLE | PENDING | SETTLED | DISPUTED
+  codSettlementState CodSettlementState?
   codSettledAt       DateTime?
   codSettlementNote  String?
 
@@ -154,20 +335,27 @@ model PaymentRecord {
   @@index([codSettlementState])
 }
 
+enum EvidenceAttemptState {
+  PENDING_REVIEW
+  ACCEPTED
+  REJECTED
+  FAILED
+}
+
 model PaymentEvidenceAttempt {
-  id                 Int       @id @default(autoincrement())
+  id                 Int                  @id @default(autoincrement())
   paymentRecordId    Int
   normalizedProvider String // bKash | Nagad (normalized uppercase)
   senderNumber       String
   trxId              String
   normalizedTrxId    String // Uppercase, trimmed
-  submittedAt        DateTime  @default(now())
-  state              String // PENDING_REVIEW | ACCEPTED | REJECTED | FAILED
+  submittedAt        DateTime             @default(now())
+  state              EvidenceAttemptState
   verifiedAt         DateTime?
   verifiedBy         String?
   rejectionNote      String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
   paymentRecord PaymentRecord @relation(fields: [paymentRecordId], references: [id], onDelete: Cascade)
 
@@ -175,19 +363,26 @@ model PaymentEvidenceAttempt {
   @@index([normalizedProvider, normalizedTrxId])
 }
 
+enum ReturnDisposition {
+  PENDING_INSPECTION
+  RESTOCKABLE
+  NON_RESTOCKABLE
+  DAMAGED
+}
+
 model ReturnItem {
-  id               Int       @id @default(autoincrement())
+  id               Int               @id @default(autoincrement())
   orderId          String
   orderItemId      Int
   productId        Int?
   variantId        Int?
   quantity         Int
-  disposition      String // PENDING_INSPECTION | RESTOCKABLE | NON_RESTOCKABLE | DAMAGED
+  disposition      ReturnDisposition
   physicalReturnAt DateTime?
   restockedAt      DateTime?
   adminNote        String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 
@@ -205,6 +400,7 @@ model Category {
   sortOrder     Int           @default(0)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+  products      Product[]
   subcategories Subcategory[]
 }
 
@@ -267,6 +463,7 @@ model CustomerSession {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([userId, expiresAt])
   @@index([expiresAt])
   @@index([revokedAt])
 }

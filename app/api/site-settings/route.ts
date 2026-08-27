@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/adminSession";
+import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function publicCacheHeaders(seconds = 600) {
   return {
     "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}`,
   };
 }
-import { requireAdmin } from "@/lib/adminSession";
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 type SiteSettings = {
   siteName: string;
@@ -18,31 +17,28 @@ type SiteSettings = {
   logoUrl: string;
 };
 
-const filePath = path.join(process.cwd(), "data", "site-settings.json");
-
 const defaultSettings: SiteSettings = {
   siteName: "PURE",
   siteSubtitle: "HAVEN BD",
   logoUrl: "",
 };
 
-async function ensureFile() {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    await readFile(filePath, "utf8");
-  } catch {
-    await writeFile(filePath, JSON.stringify(defaultSettings, null, 2), "utf8");
-  }
-}
-
 async function readSettings(): Promise<SiteSettings> {
-  await ensureFile();
   try {
-    const raw = await readFile(filePath, "utf8");
-    return { ...defaultSettings, ...JSON.parse(raw) };
-  } catch {
-    return defaultSettings;
+    const branding = await prisma.siteBranding.findUnique({
+      where: { singletonKey: "PRIMARY" },
+    });
+    if (branding) {
+      return {
+        siteName: branding.siteName || defaultSettings.siteName,
+        siteSubtitle: branding.siteSubtitle || defaultSettings.siteSubtitle,
+        logoUrl: branding.logoUrl || "",
+      };
+    }
+  } catch (error) {
+    console.error("Failed to read site branding:", error);
   }
+  return defaultSettings;
 }
 
 export async function GET() {
@@ -57,14 +53,25 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json();
 
-    const settings: SiteSettings = {
-      siteName: typeof body.siteName === "string" && body.siteName.trim() ? body.siteName.trim() : defaultSettings.siteName,
-      siteSubtitle: typeof body.siteSubtitle === "string" ? body.siteSubtitle.trim() : "",
-      logoUrl: typeof body.logoUrl === "string" ? body.logoUrl.trim() : "",
-    };
+    const siteName =
+      typeof body.siteName === "string" && body.siteName.trim()
+        ? body.siteName.trim()
+        : defaultSettings.siteName;
+    const siteSubtitle =
+      typeof body.siteSubtitle === "string" ? body.siteSubtitle.trim() : "";
+    const logoUrl = typeof body.logoUrl === "string" ? body.logoUrl.trim() : "";
 
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, JSON.stringify(settings, null, 2), "utf8");
+    const branding = await prisma.siteBranding.upsert({
+      where: { singletonKey: "PRIMARY" },
+      update: { siteName, siteSubtitle, logoUrl },
+      create: { singletonKey: "PRIMARY", siteName, siteSubtitle, logoUrl },
+    });
+
+    const settings: SiteSettings = {
+      siteName: branding.siteName,
+      siteSubtitle: branding.siteSubtitle,
+      logoUrl: branding.logoUrl || "",
+    };
 
     return NextResponse.json({ success: true, settings }, { headers: publicCacheHeaders() });
   } catch (error) {
