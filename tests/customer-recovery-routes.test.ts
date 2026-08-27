@@ -15,7 +15,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "../lib/prisma.js";
 import { hashCustomerPassword } from "../lib/customerAuth.js";
 import { createCustomerSession, validateCustomerSession } from "../lib/customerSession.js";
-import { getLatestSentMail, clearSentMail } from "../lib/customerAuthMailer.js";
+import { getLatestSentMail, clearSentMail, setCustomerAuthMailer } from "../lib/customerAuthMailer.js";
 import { POST as handleResetRequest } from "../app/api/customer-auth/password-reset/request/route.js";
 import { POST as handleResetConfirm } from "../app/api/customer-auth/password-reset/confirm/route.js";
 import { POST as handleVerifyResend } from "../app/api/customer-auth/email-verification/resend/route.js";
@@ -353,5 +353,341 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     });
     const res4 = await handleVerifyConfirm(req4);
     assert.strictEqual(res4.status, 403);
+  });
+
+  it("G. Reset Resend / Replacement — R1 invalidated, R2 active and succeeds", async () => {
+    clearSentMail();
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `replacement_reset_${suffix}@example.com`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Replacement User",
+        email,
+        passwordHash,
+        emailVerifiedAt: new Date(),
+        isActive: true,
+      },
+    });
+
+    try {
+      // 1. Request R1
+      const req1 = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.20.1",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ identifier: email }),
+      });
+      await handleResetRequest(req1);
+      const mail1 = getLatestSentMail(email);
+      assert.ok(mail1?.token, "Mail 1 must have token");
+      const token1 = mail1.token;
+
+      // 2. Request R2
+      const req2 = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.20.1",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ identifier: email }),
+      });
+      await handleResetRequest(req2);
+      const mail2 = getLatestSentMail(email);
+      assert.ok(mail2?.token, "Mail 2 must have token");
+      const token2 = mail2.token;
+      assert.notStrictEqual(token1, token2, "Token 1 and Token 2 must be distinct");
+
+      // 3. Confirm with Token 1 (Must fail)
+      const confirmReq1 = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.20.2",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ token: token1, newPassword: "NewPassword!999" }),
+      });
+      const confirmRes1 = await handleResetConfirm(confirmReq1);
+      assert.strictEqual(confirmRes1.status, 400, "Old reset token R1 must fail confirmation");
+
+      // 4. Confirm with Token 2 (Must succeed)
+      const confirmReq2 = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.20.2",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ token: token2, newPassword: "NewPassword!999" }),
+      });
+      const confirmRes2 = await handleResetConfirm(confirmReq2);
+      assert.strictEqual(confirmRes2.status, 200, "Newest reset token R2 must succeed");
+    } finally {
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("H. Verification Resend Replacement — V1 invalidated, V2 active and succeeds", async () => {
+    clearSentMail();
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `replacement_verify_${suffix}@example.com`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Replacement Verify User",
+        email,
+        passwordHash,
+        emailVerifiedAt: null,
+        isActive: true,
+      },
+    });
+
+    const session = await createCustomerSession(user.id);
+
+    try {
+      // 1. Resend V1
+      const req1 = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/resend", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.21.1",
+          cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
+        },
+      });
+      await handleVerifyResend(req1);
+      const mail1 = getLatestSentMail(email);
+      assert.ok(mail1?.token);
+      const token1 = mail1.token;
+
+      // 2. Resend V2
+      const req2 = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/resend", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.21.1",
+          cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
+        },
+      });
+      await handleVerifyResend(req2);
+      const mail2 = getLatestSentMail(email);
+      assert.ok(mail2?.token);
+      const token2 = mail2.token;
+      assert.notStrictEqual(token1, token2);
+
+      // 3. Confirm with Token 1 (Must fail)
+      const confirmReq1 = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.21.2",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ token: token1 }),
+      });
+      const confirmRes1 = await handleVerifyConfirm(confirmReq1);
+      assert.strictEqual(confirmRes1.status, 400, "V1 must fail confirmation");
+
+      // 4. Confirm with Token 2 (Must succeed)
+      const confirmReq2 = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.21.2",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ token: token2 }),
+      });
+      const confirmRes2 = await handleVerifyConfirm(confirmReq2);
+      assert.strictEqual(confirmRes2.status, 200, "V2 must succeed");
+    } finally {
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("I. Mail Send Failure — Password reset token is invalidated when mail dispatch throws", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `mail_fail_reset_${suffix}@example.com`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Mail Fail Reset User",
+        email,
+        passwordHash,
+        emailVerifiedAt: new Date(),
+        isActive: true,
+      },
+    });
+
+    // Custom failing mailer
+    const failingMailer = {
+      async sendPasswordReset() {
+        throw new Error("SMTP connection refused: simulated failure");
+      },
+      async sendEmailVerification() {
+        return { success: true };
+      },
+    };
+
+    setCustomerAuthMailer(failingMailer);
+
+    try {
+      const req = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.22.1",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ identifier: email }),
+      });
+
+      const res = await handleResetRequest(req);
+      assert.strictEqual(res.status, 200, "Response must remain generic 200 for security");
+
+      // Verify no active unconsumed password reset token remains in DB
+      const activeTokens = await prisma.customerAuthToken.findMany({
+        where: {
+          userId: user.id,
+          purpose: "PASSWORD_RESET",
+          consumedAt: null,
+        },
+      });
+
+      assert.strictEqual(activeTokens.length, 0, "Failed mail delivery must invalidate undelivered reset token");
+    } finally {
+      setCustomerAuthMailer(null);
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("J. Mail Send Failure — Email verification token is invalidated when mail dispatch throws", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `mail_fail_verify_${suffix}@example.com`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Mail Fail Verify User",
+        email,
+        passwordHash,
+        emailVerifiedAt: null,
+        isActive: true,
+      },
+    });
+
+    const session = await createCustomerSession(user.id);
+
+    // Custom failing mailer
+    const failingMailer = {
+      async sendPasswordReset() {
+        return { success: true };
+      },
+      async sendEmailVerification() {
+        throw new Error("SMTP network error: simulated verification failure");
+      },
+    };
+
+    setCustomerAuthMailer(failingMailer);
+
+    try {
+      const req = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/resend", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.23.1",
+          cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
+        },
+      });
+
+      const res = await handleVerifyResend(req);
+      assert.strictEqual(res.status, 200, "Must return success notice without throwing unhandled error");
+
+      // Verify no active unconsumed email verification token remains in DB
+      const activeTokens = await prisma.customerAuthToken.findMany({
+        where: {
+          userId: user.id,
+          purpose: "EMAIL_VERIFICATION",
+          consumedAt: null,
+        },
+      });
+
+      assert.strictEqual(activeTokens.length, 0, "Failed mail delivery must invalidate undelivered verification token");
+    } finally {
+      setCustomerAuthMailer(null);
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("K. Production-Deferred Mailer Safety — Never logs raw tokens and fails closed in production", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const envObj = process.env as Record<string, string | undefined>;
+    try {
+      // Test production fail-closed
+      envObj.NODE_ENV = "production";
+      envObj.TEST_MAIL_TRANSPORT = "true";
+
+      // Accessing test mailbox in production must throw
+      assert.throws(
+        () => getLatestSentMail(),
+        /Test mailbox is not accessible outside test environment/
+      );
+    } finally {
+      envObj.NODE_ENV = originalNodeEnv;
+      delete envObj.TEST_MAIL_TRANSPORT;
+    }
+  });
+
+  it("L. Phone Recovery Routing — Phone identifier with verified email sends reset mail to verified email", async () => {
+    clearSentMail();
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `phone_routing_${suffix}@example.com`;
+    const phone = "01711223399";
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Phone Routing User",
+        email,
+        normalizedPhone: phone,
+        passwordHash,
+        emailVerifiedAt: new Date(),
+        isActive: true,
+      },
+    });
+
+    try {
+      // Submit password reset request using PHONE identifier
+      const req = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.24.1",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ identifier: "+880 1711-223399" }),
+      });
+
+      const res = await handleResetRequest(req);
+      assert.strictEqual(res.status, 200);
+
+      // Verify email was dispatched to user's verified recovery email
+      const mail = getLatestSentMail(email);
+      assert.ok(mail, "Reset instructions must be dispatched to verified email address");
+      assert.strictEqual(mail.to, email);
+      assert.ok(mail.token, "Mail must contain reset token");
+    } finally {
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
   });
 });

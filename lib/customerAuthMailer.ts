@@ -80,7 +80,11 @@ export function getCustomerAuthMailer(): CustomerAuthMailer {
     return activeMailer;
   }
 
-  if (process.env.NODE_ENV === "test" || process.env.TEST_MAIL_TRANSPORT === "true") {
+  // Test transport strictly forbidden in production
+  if (
+    process.env.NODE_ENV !== "production" &&
+    (process.env.NODE_ENV === "test" || process.env.TEST_MAIL_TRANSPORT === "true")
+  ) {
     activeMailer = new TestCustomerAuthMailer();
     return activeMailer;
   }
@@ -97,7 +101,10 @@ export function setCustomerAuthMailer(mailer: CustomerAuthMailer | null): void {
  * Test harness helpers — Fail closed outside of test environment
  */
 export function getLatestSentMail(to?: string): SentMailRecord | null {
-  if (process.env.NODE_ENV !== "test" && process.env.TEST_MAIL_TRANSPORT !== "true") {
+  if (
+    process.env.NODE_ENV === "production" ||
+    (process.env.NODE_ENV !== "test" && process.env.TEST_MAIL_TRANSPORT !== "true")
+  ) {
     throw new Error("Test mailbox is not accessible outside test environment");
   }
   if (!to) {
