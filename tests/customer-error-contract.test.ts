@@ -88,14 +88,14 @@ describe("Wave E — Customer Error Contract & Data Leak Audit", () => {
     await assertNoLeaks(res);
   });
 
-  it("F. Password reset request with empty identifier returns clean generic error", async () => {
+  it("F. Password reset request with empty identifier returns clean enumeration-safe 200", async () => {
     const req = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/request", {
       method: "POST",
       headers: { "Content-Type": "application/json", origin: "http://localhost:3000" },
       body: JSON.stringify({ identifier: "" }),
     });
     const res = await handleResetRequest(req);
-    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.status, 200);
     await assertNoLeaks(res);
   });
 });

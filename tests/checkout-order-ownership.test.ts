@@ -23,16 +23,21 @@ import { createCustomerSession } from "../lib/customerSession.js";
 import { hashCustomerPassword } from "../lib/customerAuth.js";
 import { prisma } from "../lib/prisma.js";
 
+function randomPhone() {
+  return `017${Math.floor(10000000 + Math.random() * 90000000)}`;
+}
+
 describe("Wave C — Authenticated Checkout Ownership & Customer Order Integration", () => {
   it("A1. Authenticated email user checkout binds Order.userId to server-resolved user.id", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);
     const passwordHash = await hashCustomerPassword("Password!123");
+    const userPhone = randomPhone();
 
     const user = await prisma.user.create({
       data: {
         name: "Auth Email User",
         email: `auth_email_${suffix}@example.com`,
-        normalizedPhone: "01711223344",
+        normalizedPhone: userPhone,
         passwordHash,
         isActive: true,
       },
@@ -744,7 +749,7 @@ describe("Wave C — Authenticated Checkout Ownership & Customer Order Integrati
       data: {
         name: "CSRF User",
         email: `csrf_user_${suffix}@example.com`,
-        normalizedPhone: "01711998877",
+        normalizedPhone: randomPhone(),
         passwordHash,
         isActive: true,
       },
