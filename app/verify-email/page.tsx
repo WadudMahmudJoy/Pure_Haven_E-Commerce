@@ -17,6 +17,11 @@ function VerifyEmailContent() {
       return;
     }
 
+    // Scrub sensitive bearer token from visible URL and browser history
+    if (typeof window !== "undefined" && window.history?.replaceState) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     let isMounted = true;
     async function autoVerify() {
       setLoading(true);
