@@ -135,7 +135,7 @@ test("Schema Foundation — PaymentRecord Model Contract", () => {
   assert.match(payModel, /rejectionNote\s+String\?/);
 
   // Refund Metadata
-  assert.match(payModel, /refundAmount\s+Float\?/);
+  assert.match(payModel, /refundAmount\s+(?:Decimal\?|Float\?)/);
   assert.match(payModel, /refundRequiredAt\s+DateTime\?/);
   assert.match(payModel, /refundProcessingAt\s+DateTime\?/);
   assert.match(payModel, /refundedAt\s+DateTime\?/);

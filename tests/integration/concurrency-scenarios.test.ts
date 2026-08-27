@@ -609,7 +609,7 @@ describe(
             return { winner: "LOST" };
           }
           const orderClaim = await tx.order.updateMany({
-            where: { id: order.id, status: { in: ["pending", "PENDING", "awaiting_payment"] } },
+            where: { id: order.id, status: "pending" },
             data: { status: "cancelled", cancellationReason: "system_timeout" },
           });
           if (orderClaim.count !== 1) {

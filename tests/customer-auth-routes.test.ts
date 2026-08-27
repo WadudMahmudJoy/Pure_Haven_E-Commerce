@@ -15,6 +15,7 @@
  * Run with DATABASE_URL_TEST.
  */
 
+import "dotenv/config";
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 
@@ -30,8 +31,9 @@ import { CUSTOMER_SESSION_COOKIE } from "../lib/customerSession.js";
 describe("Wave B — Customer Auth Route Handlers", () => {
   const testSuffix = Math.random().toString(36).substring(2, 8);
   const testEmail = `auth_test_${testSuffix}@example.com`;
-  const rawPhone = "+8801712-345678";
-  const canonicalPhone = "01712345678";
+  const randomPhoneDigits = Math.floor(10000000 + Math.random() * 90000000).toString();
+  const rawPhone = `+88017${randomPhoneDigits}`;
+  const canonicalPhone = `017${randomPhoneDigits}`;
   const testPassword = "ValidPassword!2026";
   const testName = "Route Test User";
 

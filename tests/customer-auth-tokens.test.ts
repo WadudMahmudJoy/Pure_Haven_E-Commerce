@@ -12,6 +12,7 @@
  * 8. Concurrent double confirmation produces exactly one winner.
  */
 
+import "dotenv/config";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { prisma } from "../lib/prisma.js";
@@ -33,7 +34,7 @@ describe("Wave D — Customer Auth Tokens Service", () => {
       data: {
         name: "Reset User A",
         email: `reset_a_${suffix}@example.com`,
-        normalizedPhone: "01711223399",
+        normalizedPhone: `01711${Math.floor(100000 + Math.random() * 900000)}`,
         passwordHash,
         emailVerifiedAt: new Date(),
         isActive: true,
@@ -73,7 +74,7 @@ describe("Wave D — Customer Auth Tokens Service", () => {
       data: {
         name: "Reset Confirm User",
         email: `reset_confirm_${suffix}@example.com`,
-        normalizedPhone: "01711223388",
+        normalizedPhone: `01711${Math.floor(100000 + Math.random() * 900000)}`,
         passwordHash: initialHash,
         emailVerifiedAt: new Date(),
         isActive: true,
@@ -121,7 +122,7 @@ describe("Wave D — Customer Auth Tokens Service", () => {
       data: {
         name: "Verify User",
         email: `verify_${suffix}@example.com`,
-        normalizedPhone: "01711223377",
+        normalizedPhone: `01711${Math.floor(100000 + Math.random() * 900000)}`,
         passwordHash,
         emailVerifiedAt: null, // Unverified
         isActive: true,

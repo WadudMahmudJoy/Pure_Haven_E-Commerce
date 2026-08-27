@@ -622,7 +622,7 @@ describe("Wave D — Real PostgreSQL Customer Auth Concurrency & Integrity", () 
         subtotal: 1000,
         deliveryFee: 100,
         total: 1100,
-        status: "CONFIRMED",
+        status: "confirmed",
         paymentMethod: "cod",
         paymentStatus: "PENDING",
         userId: null,
