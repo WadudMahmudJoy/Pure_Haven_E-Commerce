@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { sanitizeReturnTo } from "@/lib/returnTo";
 
-export default function UserLoginPage() {
+function UserLoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = sanitizeReturnTo(searchParams.get("returnTo"));
+
   const [mode, setMode] = useState<"login" | "register">("login");
 
   const [loginIdentifier, setLoginIdentifier] = useState("");
@@ -42,13 +46,13 @@ export default function UserLoginPage() {
         throw new Error(data?.message || "Email/phone or password is incorrect.");
       }
 
-      // Clear legacy localStorage identity keys
+      // Defensively clear legacy localStorage identity keys
       localStorage.removeItem("pure_haven_customer_logged_in");
       localStorage.removeItem("pure_haven_customer_name");
       localStorage.removeItem("pure_haven_customer_email");
       localStorage.removeItem("pure_haven_customer_phone");
 
-      router.push("/customer/dashboard");
+      router.push(returnTo);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Login failed.");
@@ -81,7 +85,7 @@ export default function UserLoginPage() {
       }
 
       // Registration immediately creates an active session
-      router.push("/customer/dashboard");
+      router.push(returnTo);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Registration failed.");
@@ -331,5 +335,13 @@ export default function UserLoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function UserLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#fcf8f6]" />}>
+      <UserLoginForm />
+    </Suspense>
   );
 }

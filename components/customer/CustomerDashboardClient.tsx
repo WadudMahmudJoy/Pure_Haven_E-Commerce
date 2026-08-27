@@ -104,7 +104,7 @@ export default function CustomerDashboardClient() {
         const authData = await authRes.json().catch(() => null);
 
         if (!authRes.ok || !authData?.authenticated) {
-          if (!ignore) router.push("/user-login");
+          if (!ignore) router.push("/user-login?returnTo=/customer/dashboard");
           return;
         }
 
