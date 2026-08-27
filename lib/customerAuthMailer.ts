@@ -56,20 +56,32 @@ export class TestCustomerAuthMailer implements CustomerAuthMailer {
   }
 }
 
+export function maskEmailForLogs(email: string): string {
+  const parts = email.split("@");
+  if (parts.length !== 2) return "***";
+  const [local, domain] = parts;
+  if (!local || !domain) return "***";
+  const visible = local.slice(0, 1);
+  return `${visible}***@${domain}`;
+}
+
 export class DeferredLaunchCustomerAuthMailer implements CustomerAuthMailer {
   async sendPasswordReset(payload: MailPayload): Promise<{ success: boolean; error?: string }> {
-    // In production without live SMTP transport configured, log sanitized operational notice (no raw token)
     if (process.env.NODE_ENV !== "production") {
-      console.log(`[CustomerAuthMailer] Password reset email deferred for ${payload.to}`);
+      console.log(
+        `[CustomerAuthMailer] Password reset email deferred (transport unavailable) for ${maskEmailForLogs(payload.to)}`
+      );
     }
-    return { success: true };
+    return { success: false, error: "MAIL_TRANSPORT_UNAVAILABLE" };
   }
 
   async sendEmailVerification(payload: MailPayload): Promise<{ success: boolean; error?: string }> {
     if (process.env.NODE_ENV !== "production") {
-      console.log(`[CustomerAuthMailer] Email verification deferred for ${payload.to}`);
+      console.log(
+        `[CustomerAuthMailer] Email verification deferred (transport unavailable) for ${maskEmailForLogs(payload.to)}`
+      );
     }
-    return { success: true };
+    return { success: false, error: "MAIL_TRANSPORT_UNAVAILABLE" };
   }
 }
 

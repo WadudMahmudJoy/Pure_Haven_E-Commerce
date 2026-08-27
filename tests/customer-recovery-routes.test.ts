@@ -15,7 +15,13 @@ import { NextRequest } from "next/server";
 import { prisma } from "../lib/prisma.js";
 import { hashCustomerPassword } from "../lib/customerAuth.js";
 import { createCustomerSession, validateCustomerSession } from "../lib/customerSession.js";
-import { getLatestSentMail, clearSentMail, setCustomerAuthMailer } from "../lib/customerAuthMailer.js";
+import {
+  getLatestSentMail,
+  clearSentMail,
+  setCustomerAuthMailer,
+  maskEmailForLogs,
+  DeferredLaunchCustomerAuthMailer,
+} from "../lib/customerAuthMailer.js";
 import { POST as handleResetRequest } from "../app/api/customer-auth/password-reset/request/route.js";
 import { POST as handleResetConfirm } from "../app/api/customer-auth/password-reset/confirm/route.js";
 import { POST as handleVerifyResend } from "../app/api/customer-auth/email-verification/resend/route.js";
@@ -689,5 +695,109 @@ describe("Wave D — Customer Recovery & Verification Routes", () => {
     } finally {
       await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
     }
+  });
+
+  it("M. Production-Deferred Mailer — Password reset request invalidates undelivered token in DB", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `deferred_reset_${suffix}@example.com`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Deferred Reset User",
+        email,
+        passwordHash,
+        emailVerifiedAt: new Date(),
+        isActive: true,
+      },
+    });
+
+    // Set deferred mailer
+    setCustomerAuthMailer(new DeferredLaunchCustomerAuthMailer());
+
+    try {
+      const req = new NextRequest("http://localhost:3000/api/customer-auth/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.25.1",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ identifier: email }),
+      });
+
+      const res = await handleResetRequest(req);
+      assert.strictEqual(res.status, 200, "Must return generic 200 success response");
+
+      // Verify no active unconsumed reset token remains in DB
+      const activeTokens = await prisma.customerAuthToken.findMany({
+        where: {
+          userId: user.id,
+          purpose: "PASSWORD_RESET",
+          consumedAt: null,
+        },
+      });
+
+      assert.strictEqual(activeTokens.length, 0, "Undelivered deferred token must be invalidated");
+    } finally {
+      setCustomerAuthMailer(null);
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("N. Production-Deferred Mailer — Email verification resend invalidates undelivered token in DB", async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const passwordHash = await hashCustomerPassword("Password!123");
+    const email = `deferred_verify_${suffix}@example.com`;
+
+    const user = await prisma.user.create({
+      data: {
+        name: "Deferred Verify User",
+        email,
+        passwordHash,
+        emailVerifiedAt: null,
+        isActive: true,
+      },
+    });
+
+    const session = await createCustomerSession(user.id);
+
+    // Set deferred mailer
+    setCustomerAuthMailer(new DeferredLaunchCustomerAuthMailer());
+
+    try {
+      const req = new NextRequest("http://localhost:3000/api/customer-auth/email-verification/resend", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "10.99.25.2",
+          cookie: `pure_haven_customer_session=${session.rawToken}`,
+          origin: "http://localhost:3000",
+        },
+      });
+
+      const res = await handleVerifyResend(req);
+      assert.strictEqual(res.status, 200);
+
+      // Verify no active unconsumed verification token remains in DB
+      const activeTokens = await prisma.customerAuthToken.findMany({
+        where: {
+          userId: user.id,
+          purpose: "EMAIL_VERIFICATION",
+          consumedAt: null,
+        },
+      });
+
+      assert.strictEqual(activeTokens.length, 0, "Undelivered deferred verification token must be invalidated");
+    } finally {
+      setCustomerAuthMailer(null);
+      await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
+  it("O. Logging Privacy — maskEmailForLogs masks email local part while preserving domain", () => {
+    assert.strictEqual(maskEmailForLogs("user@example.com"), "u***@example.com");
+    assert.strictEqual(maskEmailForLogs("john.doe@company.org"), "j***@company.org");
+    assert.strictEqual(maskEmailForLogs("invalid-email"), "***");
   });
 });
