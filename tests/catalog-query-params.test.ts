@@ -31,6 +31,15 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       assert.strictEqual(parsePublicCatalogParams({ pageSize: "invalid" }).pageSize, 24);
     });
 
+    it("rejects non-base-10 public pageSize representations and falls back to default 24", () => {
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "4e1" }).pageSize, 24);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "0x20" }).pageSize, 24);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "24.5" }).pageSize, 24);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "24abc" }).pageSize, 24);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "Infinity" }).pageSize, 24);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "+24" }).pageSize, 24);
+    });
+
     it("normalizes public page numbers and computes safe skip", () => {
       const page2 = parsePublicCatalogParams({ page: "2", pageSize: "24" });
       assert.strictEqual(page2.page, 2);
@@ -47,6 +56,15 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       const pageNonNumber = parsePublicCatalogParams({ page: "abc" });
       assert.strictEqual(pageNonNumber.page, 1);
       assert.strictEqual(pageNonNumber.skip, 0);
+    });
+
+    it("rejects non-base-10 public page representations and normalizes to 1", () => {
+      assert.strictEqual(parsePublicCatalogParams({ page: "1e2" }).page, 1);
+      assert.strictEqual(parsePublicCatalogParams({ page: "0x10" }).page, 1);
+      assert.strictEqual(parsePublicCatalogParams({ page: "2.5" }).page, 1);
+      assert.strictEqual(parsePublicCatalogParams({ page: "2abc" }).page, 1);
+      assert.strictEqual(parsePublicCatalogParams({ page: "Infinity" }).page, 1);
+      assert.strictEqual(parsePublicCatalogParams({ page: "+5" }).page, 1);
     });
 
     it("rejects public page > MAX_PUBLIC_PAGE (10,000) with CatalogQueryParamError", () => {
@@ -142,6 +160,24 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "100" }).pageSize, 50);
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "0" }).pageSize, 20);
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "invalid" }).pageSize, 20);
+    });
+
+    it("rejects non-base-10 admin pageSize representations and falls back to default 20", () => {
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "4e1" }).pageSize, 20);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "0x20" }).pageSize, 20);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "20.5" }).pageSize, 20);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "20abc" }).pageSize, 20);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "Infinity" }).pageSize, 20);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "+20" }).pageSize, 20);
+    });
+
+    it("rejects non-base-10 admin page representations and normalizes to 1", () => {
+      assert.strictEqual(parseAdminCatalogParams({ page: "1e2" }).page, 1);
+      assert.strictEqual(parseAdminCatalogParams({ page: "0x10" }).page, 1);
+      assert.strictEqual(parseAdminCatalogParams({ page: "2.5" }).page, 1);
+      assert.strictEqual(parseAdminCatalogParams({ page: "2abc" }).page, 1);
+      assert.strictEqual(parseAdminCatalogParams({ page: "Infinity" }).page, 1);
+      assert.strictEqual(parseAdminCatalogParams({ page: "+5" }).page, 1);
     });
 
     it("rejects admin page > MAX_ADMIN_PAGE (10,000) with CatalogQueryParamError", () => {

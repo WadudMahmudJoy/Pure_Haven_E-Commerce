@@ -19,6 +19,20 @@ export const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const MAX_PUBLIC_PAGE = 10_000;
 export const MAX_ADMIN_PAGE = 10_000;
 
+function parseCanonicalBase10Integer(raw: unknown): number | null {
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+
+  const value = String(raw).trim();
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 export function parsePublicCatalogParams(
   raw: Record<string, unknown>
 ): ParsedPublicCatalogParams {
@@ -27,8 +41,8 @@ export function parsePublicCatalogParams(
   // 1. Page normalization
   let page = 1;
   if (raw.page !== undefined && raw.page !== null && raw.page !== "") {
-    const p = Number(raw.page);
-    if (!Number.isInteger(p) || p < 1) {
+    const p = parseCanonicalBase10Integer(raw.page);
+    if (p === null || p < 1) {
       page = 1;
     } else if (p > MAX_PUBLIC_PAGE) {
       throw new CatalogQueryParamError(
@@ -43,8 +57,8 @@ export function parsePublicCatalogParams(
   // 2. PageSize normalization (default 24, max 48)
   let pageSize = 24;
   if (raw.pageSize !== undefined && raw.pageSize !== null && raw.pageSize !== "") {
-    const ps = Number(raw.pageSize);
-    pageSize = Number.isInteger(ps) && ps >= 1 ? Math.min(ps, 48) : 24;
+    const ps = parseCanonicalBase10Integer(raw.pageSize);
+    pageSize = ps !== null && ps >= 1 ? Math.min(ps, 48) : 24;
   }
 
   // 3. Sort normalization
@@ -113,8 +127,8 @@ export function parseAdminCatalogParams(
   // 1. Page normalization
   let page = 1;
   if (raw.page !== undefined && raw.page !== null && raw.page !== "") {
-    const p = Number(raw.page);
-    if (!Number.isInteger(p) || p < 1) {
+    const p = parseCanonicalBase10Integer(raw.page);
+    if (p === null || p < 1) {
       page = 1;
     } else if (p > MAX_ADMIN_PAGE) {
       throw new CatalogQueryParamError(
@@ -129,8 +143,8 @@ export function parseAdminCatalogParams(
   // 2. PageSize normalization (default 20, max 50)
   let pageSize = 20;
   if (raw.pageSize !== undefined && raw.pageSize !== null && raw.pageSize !== "") {
-    const ps = Number(raw.pageSize);
-    pageSize = Number.isInteger(ps) && ps >= 1 ? Math.min(ps, 50) : 20;
+    const ps = parseCanonicalBase10Integer(raw.pageSize);
+    pageSize = ps !== null && ps >= 1 ? Math.min(ps, 50) : 20;
   }
 
   // 3. Filter normalization
