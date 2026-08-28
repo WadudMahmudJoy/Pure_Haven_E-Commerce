@@ -6,7 +6,7 @@
  * session revocation, and race condition linearization under concurrent load.
  */
 
-import { describe, it, before } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { prisma } from "../../lib/prisma.js";

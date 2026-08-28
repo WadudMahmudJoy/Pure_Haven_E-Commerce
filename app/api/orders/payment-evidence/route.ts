@@ -5,7 +5,7 @@ import { consumeRateLimit } from "@/lib/rateLimit";
 import {
   getRateLimitClientKey,
 } from "@/lib/rateLimitPolicy";
-import { PaymentState, EvidenceAttemptState } from "@/generated/prisma/client";
+import { PaymentState } from "@/generated/prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

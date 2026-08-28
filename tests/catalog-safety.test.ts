@@ -441,7 +441,7 @@ it("Task 9 — POST /api/products Normalizes Prices and Rejects Non-Finite Price
     prisma.category.findFirst = originalCategoryFindFirst;
   });
 
-  (prisma.category.findFirst as any) = async () => ({ id: 1, name: "Skincare", slug: "skincare" });
+  prisma.category.findFirst = (async () => ({ id: 1, name: "Skincare", slug: "skincare" })) as unknown as typeof prisma.category.findFirst;
 
   let createdProductData: any = null;
   (prisma.product.create as any) = async (args: any) => {

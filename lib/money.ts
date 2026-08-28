@@ -35,8 +35,8 @@ export function toCents(value: unknown, fieldName = "Money value"): number {
     throw new Error(`${fieldName} must be a finite number`);
   }
 
-  if (typeof value === "object" && value !== null && "toFixed" in (value as any)) {
-    return parseStringToCents((value as any).toString().trim(), fieldName);
+  if (typeof value === "object" && value !== null && "toFixed" in value) {
+    return parseStringToCents(String(value).trim(), fieldName);
   }
 
   if (typeof value === "string") {
