@@ -31,6 +31,20 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       assert.strictEqual(parsePublicCatalogParams({ pageSize: "invalid" }).pageSize, 24);
     });
 
+    it("clamps huge valid decimal public pageSize to max 48", () => {
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "9007199254740992" }).pageSize, 48);
+      assert.strictEqual(
+        parsePublicCatalogParams({ pageSize: "999999999999999999999999" }).pageSize,
+        48
+      );
+    });
+
+    it("handles public pageSize with leading zeroes correctly", () => {
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "00024" }).pageSize, 24);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "00048" }).pageSize, 48);
+      assert.strictEqual(parsePublicCatalogParams({ pageSize: "00049" }).pageSize, 48);
+    });
+
     it("rejects non-base-10 public pageSize representations and falls back to default 24", () => {
       assert.strictEqual(parsePublicCatalogParams({ pageSize: "4e1" }).pageSize, 24);
       assert.strictEqual(parsePublicCatalogParams({ pageSize: "0x20" }).pageSize, 24);
@@ -58,6 +72,20 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       assert.strictEqual(pageNonNumber.skip, 0);
     });
 
+    it("handles public page with leading zeroes correctly", () => {
+      assert.strictEqual(parsePublicCatalogParams({ page: "0002" }).page, 2);
+      assert.strictEqual(parsePublicCatalogParams({ page: "00010000" }).page, 10000);
+      assert.throws(
+        () => parsePublicCatalogParams({ page: "00010001" }),
+        (err: unknown) => {
+          return (
+            err instanceof CatalogQueryParamError &&
+            err.code === "INVALID_PAGE"
+          );
+        }
+      );
+    });
+
     it("rejects non-base-10 public page representations and normalizes to 1", () => {
       assert.strictEqual(parsePublicCatalogParams({ page: "1e2" }).page, 1);
       assert.strictEqual(parsePublicCatalogParams({ page: "0x10" }).page, 1);
@@ -75,6 +103,31 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
             err instanceof CatalogQueryParamError &&
             err.code === "INVALID_PAGE" &&
             err.message.includes("10000")
+          );
+        }
+      );
+    });
+
+    it("rejects huge canonical decimal public page above MAX_SAFE_INTEGER with CatalogQueryParamError", () => {
+      assert.throws(
+        () => parsePublicCatalogParams({ page: "9007199254740992" }),
+        (err: unknown) => {
+          return (
+            err instanceof CatalogQueryParamError &&
+            err.code === "INVALID_PAGE"
+          );
+        }
+      );
+
+      assert.throws(
+        () =>
+          parsePublicCatalogParams({
+            page: "999999999999999999999999999999999999",
+          }),
+        (err: unknown) => {
+          return (
+            err instanceof CatalogQueryParamError &&
+            err.code === "INVALID_PAGE"
           );
         }
       );
@@ -162,6 +215,20 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "invalid" }).pageSize, 20);
     });
 
+    it("clamps huge valid decimal admin pageSize to max 50", () => {
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "9007199254740992" }).pageSize, 50);
+      assert.strictEqual(
+        parseAdminCatalogParams({ pageSize: "999999999999999999999999" }).pageSize,
+        50
+      );
+    });
+
+    it("handles admin pageSize with leading zeroes correctly", () => {
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "00020" }).pageSize, 20);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "00050" }).pageSize, 50);
+      assert.strictEqual(parseAdminCatalogParams({ pageSize: "00051" }).pageSize, 50);
+    });
+
     it("rejects non-base-10 admin pageSize representations and falls back to default 20", () => {
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "4e1" }).pageSize, 20);
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "0x20" }).pageSize, 20);
@@ -169,6 +236,20 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "20abc" }).pageSize, 20);
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "Infinity" }).pageSize, 20);
       assert.strictEqual(parseAdminCatalogParams({ pageSize: "+20" }).pageSize, 20);
+    });
+
+    it("handles admin page with leading zeroes correctly", () => {
+      assert.strictEqual(parseAdminCatalogParams({ page: "0002" }).page, 2);
+      assert.strictEqual(parseAdminCatalogParams({ page: "00010000" }).page, 10000);
+      assert.throws(
+        () => parseAdminCatalogParams({ page: "00010001" }),
+        (err: unknown) => {
+          return (
+            err instanceof CatalogQueryParamError &&
+            err.code === "INVALID_PAGE"
+          );
+        }
+      );
     });
 
     it("rejects non-base-10 admin page representations and normalizes to 1", () => {
@@ -183,6 +264,31 @@ describe("Task 1 — Catalog Query Params Unit Tests", () => {
     it("rejects admin page > MAX_ADMIN_PAGE (10,000) with CatalogQueryParamError", () => {
       assert.throws(
         () => parseAdminCatalogParams({ page: String(MAX_ADMIN_PAGE + 1) }),
+        (err: unknown) => {
+          return (
+            err instanceof CatalogQueryParamError &&
+            err.code === "INVALID_PAGE"
+          );
+        }
+      );
+    });
+
+    it("rejects huge canonical decimal admin page above MAX_SAFE_INTEGER with CatalogQueryParamError", () => {
+      assert.throws(
+        () => parseAdminCatalogParams({ page: "9007199254740992" }),
+        (err: unknown) => {
+          return (
+            err instanceof CatalogQueryParamError &&
+            err.code === "INVALID_PAGE"
+          );
+        }
+      );
+
+      assert.throws(
+        () =>
+          parseAdminCatalogParams({
+            page: "999999999999999999999999999999999999",
+          }),
         (err: unknown) => {
           return (
             err instanceof CatalogQueryParamError &&

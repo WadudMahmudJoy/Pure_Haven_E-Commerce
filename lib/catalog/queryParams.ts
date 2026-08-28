@@ -19,7 +19,7 @@ export const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const MAX_PUBLIC_PAGE = 10_000;
 export const MAX_ADMIN_PAGE = 10_000;
 
-function parseCanonicalBase10Integer(raw: unknown): number | null {
+function normalizeCanonicalDecimalDigits(raw: unknown): string | null {
   if (raw === undefined || raw === null) {
     return null;
   }
@@ -29,8 +29,15 @@ function parseCanonicalBase10Integer(raw: unknown): number | null {
     return null;
   }
 
-  const parsed = Number.parseInt(value, 10);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  return value.replace(/^0+(?=\d)/, "");
+}
+
+function exceedsDecimalBound(decimalDigits: string, max: number): boolean {
+  const maxText = String(max);
+  if (decimalDigits.length !== maxText.length) {
+    return decimalDigits.length > maxText.length;
+  }
+  return decimalDigits > maxText;
 }
 
 export function parsePublicCatalogParams(
@@ -41,24 +48,35 @@ export function parsePublicCatalogParams(
   // 1. Page normalization
   let page = 1;
   if (raw.page !== undefined && raw.page !== null && raw.page !== "") {
-    const p = parseCanonicalBase10Integer(raw.page);
-    if (p === null || p < 1) {
-      page = 1;
-    } else if (p > MAX_PUBLIC_PAGE) {
-      throw new CatalogQueryParamError(
-        "INVALID_PAGE",
-        `Requested page exceeds maximum allowed page boundary (${MAX_PUBLIC_PAGE}).`
-      );
+    const digits = normalizeCanonicalDecimalDigits(raw.page);
+    if (digits !== null) {
+      if (exceedsDecimalBound(digits, MAX_PUBLIC_PAGE)) {
+        throw new CatalogQueryParamError(
+          "INVALID_PAGE",
+          `Requested page exceeds maximum allowed page boundary (${MAX_PUBLIC_PAGE}).`
+        );
+      }
+      const parsed = Number.parseInt(digits, 10);
+      page = parsed >= 1 ? parsed : 1;
     } else {
-      page = p;
+      page = 1;
     }
   }
 
   // 2. PageSize normalization (default 24, max 48)
   let pageSize = 24;
   if (raw.pageSize !== undefined && raw.pageSize !== null && raw.pageSize !== "") {
-    const ps = parseCanonicalBase10Integer(raw.pageSize);
-    pageSize = ps !== null && ps >= 1 ? Math.min(ps, 48) : 24;
+    const digits = normalizeCanonicalDecimalDigits(raw.pageSize);
+    if (digits !== null) {
+      if (exceedsDecimalBound(digits, 48)) {
+        pageSize = 48;
+      } else {
+        const parsed = Number.parseInt(digits, 10);
+        pageSize = parsed >= 1 ? parsed : 24;
+      }
+    } else {
+      pageSize = 24;
+    }
   }
 
   // 3. Sort normalization
@@ -127,24 +145,35 @@ export function parseAdminCatalogParams(
   // 1. Page normalization
   let page = 1;
   if (raw.page !== undefined && raw.page !== null && raw.page !== "") {
-    const p = parseCanonicalBase10Integer(raw.page);
-    if (p === null || p < 1) {
-      page = 1;
-    } else if (p > MAX_ADMIN_PAGE) {
-      throw new CatalogQueryParamError(
-        "INVALID_PAGE",
-        `Requested admin page exceeds maximum allowed boundary (${MAX_ADMIN_PAGE}).`
-      );
+    const digits = normalizeCanonicalDecimalDigits(raw.page);
+    if (digits !== null) {
+      if (exceedsDecimalBound(digits, MAX_ADMIN_PAGE)) {
+        throw new CatalogQueryParamError(
+          "INVALID_PAGE",
+          `Requested admin page exceeds maximum allowed boundary (${MAX_ADMIN_PAGE}).`
+        );
+      }
+      const parsed = Number.parseInt(digits, 10);
+      page = parsed >= 1 ? parsed : 1;
     } else {
-      page = p;
+      page = 1;
     }
   }
 
   // 2. PageSize normalization (default 20, max 50)
   let pageSize = 20;
   if (raw.pageSize !== undefined && raw.pageSize !== null && raw.pageSize !== "") {
-    const ps = parseCanonicalBase10Integer(raw.pageSize);
-    pageSize = ps !== null && ps >= 1 ? Math.min(ps, 50) : 20;
+    const digits = normalizeCanonicalDecimalDigits(raw.pageSize);
+    if (digits !== null) {
+      if (exceedsDecimalBound(digits, 50)) {
+        pageSize = 50;
+      } else {
+        const parsed = Number.parseInt(digits, 10);
+        pageSize = parsed >= 1 ? parsed : 20;
+      }
+    } else {
+      pageSize = 20;
+    }
   }
 
   // 3. Filter normalization
