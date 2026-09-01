@@ -246,6 +246,23 @@ describe(
       prodDiscNullId = pDiscNull.id;
       createdProductIds.push(pDiscNull.id);
 
+      // Additional 25 discount products to test multi-page bounded discount pagination
+      for (let i = 1; i <= 25; i++) {
+        const pDiscPad = await prisma.product.create({
+          data: {
+            name: `Discount Padding ${String(i).padStart(2, "0")} ${runKey}`,
+            price: 50.0 + i,
+            compareAtPrice: 100.0 + i, // > price
+            image: `/images/disc-pad-${i}.png`,
+            category: `General ${runKey}`,
+            categoryId: catA.id,
+            isActive: true,
+            stock: 10,
+          },
+        });
+        createdProductIds.push(pDiscPad.id);
+      }
+
       // 6. Create Search Authority Fixtures
       const pNameSearch = await prisma.product.create({
         data: {
@@ -621,6 +638,76 @@ describe(
       );
     });
 
+    it("filter=discount paginates multi-page discount slices without unbounded ID materialization", async () => {
+      const page1 = await getAdminCatalogQuery({
+        page: 1,
+        pageSize: 20,
+        filter: "discount",
+        q: runKey,
+        skip: 0,
+      });
+
+      assert.strictEqual(page1.page, 1);
+      assert.strictEqual(page1.pageSize, 20);
+      assert.strictEqual(page1.items.length, 20);
+      assert.strictEqual(page1.totalItems, 27, "Expected 25 padding + 1 true discount + 1 detail target products");
+      assert.strictEqual(page1.totalPages, 2);
+      assert.strictEqual(page1.hasMore, true);
+      assert.strictEqual(page1.nextPage, 2);
+
+      const page2 = await getAdminCatalogQuery({
+        page: 2,
+        pageSize: 20,
+        filter: "discount",
+        q: runKey,
+        skip: 20,
+      });
+
+      assert.strictEqual(page2.page, 2);
+      assert.strictEqual(page2.pageSize, 20);
+      assert.strictEqual(page2.items.length, 7);
+      assert.strictEqual(page2.hasMore, false);
+      assert.strictEqual(page2.nextPage, null);
+
+      const page1Ids = new Set(page1.items.map((i) => i.id));
+      for (const item of page2.items) {
+        assert.ok(
+          !page1Ids.has(item.id),
+          `ID ${item.id} must not appear on both page 1 and page 2`
+        );
+      }
+    });
+
+    it("filter=discount executes zero standalone $queryRaw discount ID precursor queries", async () => {
+      let rawQueryCount = 0;
+      const prismaRecord = prisma as unknown as { $queryRaw: (...args: unknown[]) => Promise<unknown> };
+      const originalQueryRaw = prismaRecord.$queryRaw;
+
+      prismaRecord.$queryRaw = async (...args: unknown[]) => {
+        rawQueryCount++;
+        return originalQueryRaw.apply(prisma, args);
+      };
+
+      try {
+        const result = await getAdminCatalogQuery({
+          page: 1,
+          pageSize: 20,
+          filter: "discount",
+          q: runKey,
+          skip: 0,
+        });
+
+        assert.strictEqual(
+          rawQueryCount,
+          0,
+          "filter=discount must not execute precursor $queryRaw discount ID select"
+        );
+        assert.ok(result.items.length > 0);
+      } finally {
+        prismaRecord.$queryRaw = originalQueryRaw;
+      }
+    });
+
     // -------------------------------------------------------------------------
     // C. Admin Filters (hot, upcoming, badge)
     // -------------------------------------------------------------------------
@@ -839,7 +926,7 @@ describe(
     it("projects exact AdminProductListDTO fields and excludes forbidden fields (description, deletedAt, updatedAt, variants[])", async () => {
       const result = await getAdminCatalogQuery({
         page: 1,
-        pageSize: 50,
+        pageSize: 100,
         filter: "all",
         q: runKey,
         skip: 0,
@@ -875,7 +962,7 @@ describe(
     it("calculates variantCount and hasVariants based strictly on ACTIVE variants", async () => {
       const result = await getAdminCatalogQuery({
         page: 1,
-        pageSize: 50,
+        pageSize: 100,
         filter: "all",
         q: runKey,
         skip: 0,
@@ -975,7 +1062,7 @@ describe(
     it("DTO presentation boundary converts price and compareAtPrice Decimal fields to numbers", async () => {
       const result = await getAdminCatalogQuery({
         page: 1,
-        pageSize: 10,
+        pageSize: 100,
         filter: "discount",
         q: runKey,
         skip: 0,

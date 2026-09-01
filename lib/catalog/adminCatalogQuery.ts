@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import type {
   ParsedAdminCatalogParams,
   PaginatedResult,
@@ -25,16 +25,10 @@ export async function getAdminCatalogQuery(
     where.badgeText = { not: null };
   } else if (params.filter === "discount") {
     // Database-side exact discount predicate: compareAtPrice IS NOT NULL AND compareAtPrice > price
-    const discountRows = await prisma.$queryRaw<{ id: number }[]>(
-      Prisma.sql`
-        SELECT id FROM "Product"
-        WHERE "isActive" = true
-          AND "deletedAt" IS NULL
-          AND "compareAtPrice" IS NOT NULL
-          AND "compareAtPrice" > "price"
-      `
-    );
-    where.id = { in: discountRows.map((r) => r.id) };
+    where.compareAtPrice = {
+      not: null,
+      gt: prisma.product.fields.price,
+    };
   }
 
   // 3. Search query handling (Product.name, category, subcategory, exact numeric ID)
@@ -51,12 +45,7 @@ export async function getAdminCatalogQuery(
       searchConditions.push({ id: numId });
     }
 
-    if (where.id) {
-      where.AND = [{ id: where.id }, { OR: searchConditions }];
-      delete where.id;
-    } else {
-      where.OR = searchConditions;
-    }
+    where.OR = searchConditions;
   }
 
   // 4. Bounded concurrent query and total counting
