@@ -6,24 +6,28 @@
  * session revocation, and race condition linearization under concurrent load.
  */
 
-import { describe, it } from "node:test";
+import "dotenv/config";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
-import { prisma } from "../../lib/prisma.js";
 import { validateTestDatabaseSafety } from "./db-safety.js";
 import { hashCustomerPassword } from "../../lib/customerAuth.js";
-import {
-  createPasswordResetToken,
-  consumePasswordResetToken,
-  createEmailVerificationToken,
-  consumeEmailVerificationToken,
+import type { PrismaClient } from "../../generated/prisma/client";
+import type {
+  createPasswordResetToken as CreatePasswordResetTokenType,
+  consumePasswordResetToken as ConsumePasswordResetTokenType,
+  createEmailVerificationToken as CreateEmailVerificationTokenType,
+  consumeEmailVerificationToken as ConsumeEmailVerificationTokenType,
 } from "../../lib/customerAuthTokens.js";
-import { createCustomerSession, validateCustomerSession } from "../../lib/customerSession.js";
-import { POST as handleIdentity } from "../../app/api/customer-auth/identity/route.js";
-import { POST as handleVerifyConfirm } from "../../app/api/customer-auth/email-verification/confirm/route.js";
-import { POST as handleResetConfirm } from "../../app/api/customer-auth/password-reset/confirm/route.js";
-import { POST as handleLogin } from "../../app/api/customer-auth/login/route.js";
-import { GET as handleCustomerOrders } from "../../app/api/customer-orders/route.js";
+import type {
+  createCustomerSession as CreateCustomerSessionType,
+  validateCustomerSession as ValidateCustomerSessionType,
+} from "../../lib/customerSession.js";
+import type { POST as HandleIdentityType } from "../../app/api/customer-auth/identity/route.js";
+import type { POST as HandleVerifyConfirmType } from "../../app/api/customer-auth/email-verification/confirm/route.js";
+import type { POST as HandleResetConfirmType } from "../../app/api/customer-auth/password-reset/confirm/route.js";
+import type { POST as HandleLoginType } from "../../app/api/customer-auth/login/route.js";
+import type { GET as HandleCustomerOrdersType } from "../../app/api/customer-orders/route.js";
 
 const safety = validateTestDatabaseSafety();
 
@@ -35,6 +39,53 @@ describe(
       "TEST_DATABASE_REQUIRED: Set DATABASE_URL_TEST to run real PostgreSQL concurrency tests",
   },
   () => {
+    let prisma: PrismaClient;
+    let createPasswordResetToken: typeof CreatePasswordResetTokenType;
+    let consumePasswordResetToken: typeof ConsumePasswordResetTokenType;
+    let createEmailVerificationToken: typeof CreateEmailVerificationTokenType;
+    let consumeEmailVerificationToken: typeof ConsumeEmailVerificationTokenType;
+    let createCustomerSession: typeof CreateCustomerSessionType;
+    let validateCustomerSession: typeof ValidateCustomerSessionType;
+    let handleIdentity: typeof HandleIdentityType;
+    let handleVerifyConfirm: typeof HandleVerifyConfirmType;
+    let handleResetConfirm: typeof HandleResetConfirmType;
+    let handleLogin: typeof HandleLoginType;
+    let handleCustomerOrders: typeof HandleCustomerOrdersType;
+
+    before(async () => {
+      if (!safety.safe) return;
+
+      (process.env as Record<string, string | undefined>).NODE_ENV = "test";
+      process.env.DATABASE_URL = process.env.DATABASE_URL_TEST!;
+
+      const prismaModule = await import("../../lib/prisma.js");
+      prisma = prismaModule.prisma;
+
+      const tokensModule = await import("../../lib/customerAuthTokens.js");
+      createPasswordResetToken = tokensModule.createPasswordResetToken;
+      consumePasswordResetToken = tokensModule.consumePasswordResetToken;
+      createEmailVerificationToken = tokensModule.createEmailVerificationToken;
+      consumeEmailVerificationToken = tokensModule.consumeEmailVerificationToken;
+
+      const sessionModule = await import("../../lib/customerSession.js");
+      createCustomerSession = sessionModule.createCustomerSession;
+      validateCustomerSession = sessionModule.validateCustomerSession;
+
+      const identityRoute = await import("../../app/api/customer-auth/identity/route.js");
+      handleIdentity = identityRoute.POST;
+
+      const verifyConfirmRoute = await import("../../app/api/customer-auth/email-verification/confirm/route.js");
+      handleVerifyConfirm = verifyConfirmRoute.POST;
+
+      const resetConfirmRoute = await import("../../app/api/customer-auth/password-reset/confirm/route.js");
+      handleResetConfirm = resetConfirmRoute.POST;
+
+      const loginRoute = await import("../../app/api/customer-auth/login/route.js");
+      handleLogin = loginRoute.POST;
+
+      const ordersRoute = await import("../../app/api/customer-orders/route.js");
+      handleCustomerOrders = ordersRoute.GET;
+    });
 
   it("1. Concurrent Password Reset Confirmation Race — Exactly one winner consumes token and updates password", async () => {
     const suffix = Math.random().toString(36).slice(2, 8);
