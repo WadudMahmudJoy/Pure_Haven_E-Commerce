@@ -23,10 +23,12 @@ describe(
     const catBSlug = `haircare-${runKey}`;
     const catCSlug = `inactive-cat-${runKey}`;
     const subcatASlug = `face-serum-${runKey}`;
-    const subcatAName = `Face Serum ${runKey}`;
     const subcatBSlug = `shampoo-${runKey}`;
     const subcatBName = `Shampoo ${runKey}`;
-    const searchToken = `searchtoken_${runKey}`;
+    const prodNameSearchToken = `prodname_search_${runKey}`;
+    const catSearchToken = `cat_search_${runKey}`;
+    const subcatSearchToken = `subcat_search_${runKey}`;
+    const subcatAName = `Face Serum ${subcatSearchToken}`;
     const descOnlyToken = `desc_only_token_${runKey}`;
 
     let prisma: PrismaClient;
@@ -65,7 +67,7 @@ describe(
       // 2. Create Active Category A
       const catA = await prisma.category.create({
         data: {
-          name: `Skin Care ${runKey}`,
+          name: `Skin Care ${catSearchToken}`,
           slug: catASlug,
           isActive: true,
           sortOrder: 1,
@@ -124,7 +126,7 @@ describe(
       // Prod 1: Dual-format Slug-backed Subcategory
       const p1 = await prisma.product.create({
         data: {
-          name: `Alpha Serum ${searchToken}`,
+          name: `Alpha Serum ${prodNameSearchToken}`,
           price: 100.0,
           image: "/images/p1.png",
           category: "MISMATCHED_DISPLAY_SNAPSHOT_A",
@@ -681,20 +683,77 @@ describe(
     // -------------------------------------------------------------------------
     // F. Search Scope & Description Exclusion
     // -------------------------------------------------------------------------
-    it("searches product name, category name, and subcategory", async () => {
-      const nameSearchResult = await getPublicCatalogQuery({
+    it("searches Product.name", async () => {
+      const result = await getPublicCatalogQuery({
         page: 1,
         pageSize: 24,
         sort: "latest",
         category: null,
         subcategory: null,
-        q: searchToken,
+        q: prodNameSearchToken,
         skip: 0,
         invalidFilter: false,
       });
 
-      const matchedIds = nameSearchResult.items.map((i) => i.id);
-      assert.ok(matchedIds.includes(prod1SlugSubId));
+      const matchedIds = result.items.map((i) => i.id);
+      assert.ok(
+        matchedIds.includes(prod1SlugSubId),
+        "Must match product whose name contains search token"
+      );
+      assert.ok(
+        !matchedIds.includes(prod2NameSubId),
+        "Must not match product whose name does not contain search token"
+      );
+    });
+
+    it("searches relational Category.name", async () => {
+      const result = await getPublicCatalogQuery({
+        page: 1,
+        pageSize: 48,
+        sort: "latest",
+        category: null,
+        subcategory: null,
+        q: catSearchToken,
+        skip: 0,
+        invalidFilter: false,
+      });
+
+      const matchedIds = result.items.map((i) => i.id);
+      assert.ok(
+        matchedIds.includes(prod1SlugSubId),
+        "Must match Category A product via relational category name"
+      );
+      assert.ok(
+        matchedIds.includes(prod2NameSubId),
+        "Must match Category A product via relational category name"
+      );
+      assert.ok(
+        !matchedIds.includes(prod4CatBId),
+        "Must not match Category B product"
+      );
+    });
+
+    it("searches Product.subcategory", async () => {
+      const result = await getPublicCatalogQuery({
+        page: 1,
+        pageSize: 24,
+        sort: "latest",
+        category: null,
+        subcategory: null,
+        q: subcatSearchToken,
+        skip: 0,
+        invalidFilter: false,
+      });
+
+      const matchedIds = result.items.map((i) => i.id);
+      assert.ok(
+        matchedIds.includes(prod2NameSubId),
+        "Must match product whose subcategory contains search token"
+      );
+      assert.ok(
+        !matchedIds.includes(prod4CatBId),
+        "Must not match Category B product"
+      );
     });
 
     it("strictly excludes Product.description from public search matching", async () => {
