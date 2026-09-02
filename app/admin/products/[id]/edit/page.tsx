@@ -1,9 +1,19 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AdminNav from "@/components/admin/AdminNav";
+import {
+  moveGalleryItemUp,
+  moveGalleryItemDown,
+  canAddGalleryItem,
+  canRemoveGalleryItem,
+  serializeGalleryPayload,
+  type AdminGalleryItem,
+} from "@/lib/catalog/adminGalleryState";
 
 type Product = {
   id: number;
@@ -11,6 +21,7 @@ type Product = {
   price: number;
   compareAtPrice?: number | null;
   image: string;
+  images?: string[];
   category: string;
   subcategory?: string | null;
   description?: string | null;
@@ -35,7 +46,6 @@ export default function EditProductPage() {
     name: "",
     price: "",
     compareAtPrice: "",
-    image: "",
     category: "",
     subcategory: "",
     description: "",
@@ -46,8 +56,8 @@ export default function EditProductPage() {
     badgeTone: "sale",
   });
 
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [gallery, setGallery] = useState<AdminGalleryItem[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -86,7 +96,6 @@ export default function EditProductPage() {
             product.compareAtPrice === null || product.compareAtPrice === undefined
               ? ""
               : String(product.compareAtPrice),
-          image: product.image || "",
           category: product.category || "",
           subcategory: product.subcategory || "",
           description: product.description || "",
@@ -97,7 +106,30 @@ export default function EditProductPage() {
           badgeTone: product.badgeTone || "sale",
         });
 
-        setPreviewUrl(product.image || "");
+        // Initialize gallery authority from product.images with fallback to [product.image]
+        const initialImages: string[] =
+          Array.isArray(product.images) && product.images.length > 0
+            ? product.images
+            : product.image
+            ? [product.image]
+            : [];
+
+        if (initialImages.length === 0) {
+          throw new Error("Product has no valid gallery image.");
+        }
+
+        if (initialImages.length > 4) {
+          throw new Error(
+            "Product gallery exceeds the supported maximum of 4 images."
+          );
+        }
+
+        setGallery(
+          initialImages.map((url, idx) => ({
+            id: `gallery-init-${idx}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            url,
+          }))
+        );
       } catch (error) {
         if (alive) {
           setMessage(error instanceof Error ? error.message : "Failed to load product.");
@@ -136,17 +168,6 @@ export default function EditProductPage() {
     }));
   }
 
-  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] || null;
-    setImageFile(file);
-
-    if (file) {
-      setPreviewUrl(URL.createObjectURL(file));
-    } else {
-      setPreviewUrl(form.image);
-    }
-  }
-
   async function uploadImage(file: File) {
     const formData = new FormData();
     formData.append("file", file);
@@ -165,20 +186,83 @@ export default function EditProductPage() {
     return data.imagePath as string;
   }
 
+  async function handleAddImageFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!canAddGalleryItem(gallery)) {
+      setMessage("Maximum 4 images allowed in gallery.");
+      e.target.value = "";
+      return;
+    }
+
+    setUploadingImage(true);
+    setMessage("");
+
+    try {
+      const imagePath = await uploadImage(file);
+      setGallery((prev) => {
+        if (!canAddGalleryItem(prev)) {
+          return prev;
+        }
+        return [
+          ...prev,
+          {
+            id: `gallery-item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            url: imagePath,
+          },
+        ];
+      });
+      e.target.value = "";
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Image upload failed.");
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
+  function handleMoveUp(index: number) {
+    setGallery((prev) => moveGalleryItemUp(prev, index));
+  }
+
+  function handleMoveDown(index: number) {
+    setGallery((prev) => moveGalleryItemDown(prev, index));
+  }
+
+  function handleRemoveImage(index: number) {
+    if (!canRemoveGalleryItem(gallery)) {
+      setMessage("At least one image is required.");
+      return;
+    }
+    setGallery((prev) => {
+      if (!canRemoveGalleryItem(prev)) {
+        return prev;
+      }
+      return prev.filter((_, idx) => idx !== index);
+    });
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
+    if (gallery.length === 0) {
+      setMessage("At least one product image is required.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const imagePath = imageFile ? await uploadImage(imageFile) : form.image;
+      const galleryPayload = serializeGalleryPayload(gallery);
 
       const payload = {
         id: productId,
         name: form.name.trim(),
         price: Number(form.price),
         compareAtPrice: form.compareAtPrice ? Number(form.compareAtPrice) : null,
-        image: imagePath,
+        image: galleryPayload.image,
+        images: galleryPayload.images,
         category: form.category.trim(),
         subcategory: form.subcategory.trim(),
         description: form.description.trim(),
@@ -237,7 +321,7 @@ export default function EditProductPage() {
                 Edit Product
               </h1>
               <p className="mt-2 text-sm text-neutral-600">
-                Update product price, discount, badge, stock, and image.
+                Update product price, discount, badge, stock, and gallery.
               </p>
             </div>
 
@@ -389,22 +473,111 @@ export default function EditProductPage() {
               </div>
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-medium">Product Image</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageChange}
-                className="w-full rounded-2xl border border-[#ead9d1] px-4 py-3 outline-none"
-              />
+            {/* Product Gallery Section */}
+            <div className="rounded-2xl border border-[#ead9d1] bg-[#fffaf7] p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-semibold text-[#2e221d]">
+                    Product Gallery (1 to 4 images)
+                  </h2>
+                  <p className="text-xs text-neutral-600">
+                    The first image is the Primary display image. Use Up/Down to reorder.
+                  </p>
+                </div>
+                <span className="text-xs font-medium text-neutral-500">
+                  {gallery.length}/4 images
+                </span>
+              </div>
 
-              {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Preview"
-                  className="mt-4 h-44 w-44 rounded-2xl object-cover"
+              {/* Gallery Items */}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {gallery.map((item, index) => {
+                  const isPrimary = index === 0;
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex flex-col justify-between rounded-2xl border border-[#ead9d1] bg-white p-3 shadow-xs"
+                    >
+                      <div className="relative mb-2 aspect-square w-full overflow-hidden rounded-xl bg-neutral-100">
+                        <img
+                          src={item.url}
+                          alt={`Product gallery image ${index + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute top-2 left-2 flex items-center gap-1">
+                          <span className="rounded-md bg-black/70 px-2 py-0.5 text-xs font-semibold text-white">
+                            #{index + 1}
+                          </span>
+                          {isPrimary ? (
+                            <span className="rounded-md bg-[#2e221d] px-2 py-0.5 text-xs font-semibold text-white">
+                              Primary
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between gap-1">
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            aria-label="Move image up"
+                            disabled={index === 0}
+                            onClick={() => handleMoveUp(index)}
+                            className="rounded-lg border border-[#ead9d1] px-2.5 py-1 text-xs font-medium text-[#2e221d] hover:bg-[#f8f3ef] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            ↑ Up
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Move image down"
+                            disabled={index === gallery.length - 1}
+                            onClick={() => handleMoveDown(index)}
+                            className="rounded-lg border border-[#ead9d1] px-2.5 py-1 text-xs font-medium text-[#2e221d] hover:bg-[#f8f3ef] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            ↓ Down
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label="Remove image"
+                          disabled={!canRemoveGalleryItem(gallery)}
+                          onClick={() => handleRemoveImage(index)}
+                          className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add Image Control */}
+              <div className="mt-5 border-t border-[#ead9d1] pt-4">
+                <label className="mb-2 block text-sm font-medium text-[#2e221d]">
+                  Add Image to Gallery
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={!canAddGalleryItem(gallery) || uploadingImage}
+                  onChange={handleAddImageFile}
+                  className="w-full rounded-2xl border border-[#ead9d1] bg-white px-4 py-2.5 text-sm outline-none file:mr-3 file:rounded-full file:border-0 file:bg-[#2e221d] file:px-4 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-[#7a5244] disabled:cursor-not-allowed disabled:opacity-50"
                 />
-              ) : null}
+                <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
+                  <span>Supported: JPG, PNG, WEBP (up to 5 MB each).</span>
+                  {!canAddGalleryItem(gallery) ? (
+                    <span className="font-semibold text-amber-700">
+                      Maximum 4 images reached
+                    </span>
+                  ) : null}
+                  {uploadingImage ? (
+                    <span className="font-semibold text-[#2e221d]">
+                      Uploading image...
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             </div>
 
             <div>
@@ -421,7 +594,7 @@ export default function EditProductPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || uploadingImage}
               className="rounded-full bg-[#2e221d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#7a5244] disabled:opacity-60"
             >
               {loading ? "Updating..." : "Update Product"}
