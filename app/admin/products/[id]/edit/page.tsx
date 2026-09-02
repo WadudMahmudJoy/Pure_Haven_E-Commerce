@@ -53,13 +53,25 @@ export default function EditProductPage() {
   const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
+    let alive = true;
+
     async function loadProduct() {
+      if (!Number.isInteger(productId) || productId <= 0) {
+        if (alive) {
+          setMessage("Invalid product id.");
+          setInitialLoading(false);
+        }
+        return;
+      }
+
       try {
-        const res = await fetch(`/api/products?id=${productId}`, {
+        const res = await fetch(`/api/products?view=admin&id=${productId}`, {
           cache: "no-store",
         });
 
         const data = await res.json();
+
+        if (!alive) return;
 
         if (!res.ok || !data?.success || !data?.product) {
           throw new Error(data?.message || "Product not found.");
@@ -87,18 +99,21 @@ export default function EditProductPage() {
 
         setPreviewUrl(product.image || "");
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "Failed to load product.");
+        if (alive) {
+          setMessage(error instanceof Error ? error.message : "Failed to load product.");
+        }
       } finally {
-        setInitialLoading(false);
+        if (alive) {
+          setInitialLoading(false);
+        }
       }
     }
 
-    if (Number.isInteger(productId) && productId > 0) {
-      loadProduct();
-    } else {
-      setMessage("Invalid product id.");
-      setInitialLoading(false);
-    }
+    loadProduct();
+
+    return () => {
+      alive = false;
+    };
   }, [productId]);
 
   function handleChange(

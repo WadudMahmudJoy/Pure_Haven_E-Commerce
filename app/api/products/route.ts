@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminSession";
 import { prisma } from "@/lib/prisma";
-import {
-  getCachedProductListRows,
-  getCachedProductRow,
-  getCachedProductRows,
-  peekCachedProductRowFromList,
-} from "@/lib/catalogRead";
 import { invalidateProductReadCache } from "@/lib/serverReadCache";
 import { normalizeMoney, requireNonNegativeMoney } from "@/lib/money";
+import {
+  parsePublicCatalogParams,
+  parseAdminCatalogParams,
+  CatalogQueryParamError,
+} from "@/lib/catalog/queryParams";
+import {
+  getPublicCatalogQuery,
+  getPublicProductDetailQuery,
+} from "@/lib/catalog/publicCatalogQuery";
+import {
+  getAdminCatalogQuery,
+  getAdminProductDetailQuery,
+} from "@/lib/catalog/adminCatalogQuery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +49,15 @@ function validId(value: unknown) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+function parsePositiveInt(raw: string | null): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const num = Number(trimmed);
+  if (!Number.isSafeInteger(num) || num <= 0) return null;
+  return num;
+}
+
 function badgeToneValue(value: unknown) {
   const tone = text(value).toLowerCase();
   return ["sale", "new", "offer", "hot", "festival"].includes(tone)
@@ -52,13 +68,52 @@ function badgeToneValue(value: unknown) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const id = validId(searchParams.get("id"));
     const view = text(searchParams.get("view")).toLowerCase();
+    const hasId = searchParams.has("id");
 
-    if (id) {
-      const product =
-        peekCachedProductRowFromList(id) ?? (await getCachedProductRow(id));
+    // 1. ADMIN PRIVILEGED BRANCH FIRST
+    if (view === "admin" || view === "full") {
+      const unauthorized = requireAdmin(req);
+      if (unauthorized) return unauthorized;
 
+      if (hasId) {
+        const id = parsePositiveInt(searchParams.get("id"));
+        if (!id) {
+          return NextResponse.json(
+            { success: false, message: "Invalid product ID." },
+            { status: 400 }
+          );
+        }
+
+        const product = await getAdminProductDetailQuery(id);
+        if (!product) {
+          return NextResponse.json(
+            { success: false, message: "Product not found." },
+            { status: 404 }
+          );
+        }
+
+        return NextResponse.json({ success: true, product });
+      }
+
+      // Admin List
+      const rawParams = Object.fromEntries(searchParams.entries());
+      const params = parseAdminCatalogParams(rawParams);
+      const result = await getAdminCatalogQuery(params);
+      return NextResponse.json(result);
+    }
+
+    // 2. PUBLIC DETAIL BRANCH
+    if (hasId) {
+      const id = parsePositiveInt(searchParams.get("id"));
+      if (!id) {
+        return NextResponse.json(
+          { success: false, message: "Invalid product ID." },
+          { status: 400 }
+        );
+      }
+
+      const product = await getPublicProductDetailQuery(id);
       if (!product) {
         return NextResponse.json(
           { success: false, message: "Product not found." },
@@ -66,18 +121,30 @@ export async function GET(req: Request) {
         );
       }
 
-      return NextResponse.json({ success: true, product }, { headers: publicCacheHeaders() });
+      return NextResponse.json(
+        { success: true, product },
+        { headers: publicCacheHeaders() }
+      );
     }
 
-    const products =
-      view === "admin" || view === "full"
-        ? await getCachedProductRows()
-        : await getCachedProductListRows();
-
-    return NextResponse.json({ success: true, products }, { headers: publicCacheHeaders() });
+    // 3. PUBLIC LIST BRANCH
+    const rawParams = Object.fromEntries(searchParams.entries());
+    const params = parsePublicCatalogParams(rawParams);
+    const result = await getPublicCatalogQuery(params);
+    return NextResponse.json(result, { headers: publicCacheHeaders() });
   } catch (error) {
-    console.error("GET /api/products failed:", error);
+    if (error instanceof CatalogQueryParamError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: error.code,
+          message: error.message,
+        },
+        { status: 400 }
+      );
+    }
 
+    console.error("GET /api/products failed:", error);
     return NextResponse.json(
       { success: false, message: "Failed to load products." },
       { status: 500 }

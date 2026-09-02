@@ -22,6 +22,7 @@ type Product = {
   compareAtPrice?: number | null;
   image: string;
   category: string;
+  categoryId?: number | null;
   subcategory?: string | null;
   description?: string | null;
   stock?: number;
@@ -29,6 +30,8 @@ type Product = {
   isUpcoming?: boolean;
   badgeText?: string | null;
   badgeTone?: string | null;
+  variantCount?: number;
+  hasVariants?: boolean;
   variants?: {
     id?: number;
     label: string;
@@ -73,29 +76,68 @@ export default function AdminProductsPage() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
-  async function loadProducts() {
-    const res = await fetch("/api/products?view=admin", { cache: "no-store" });
+  async function loadProducts(targetPage = page, currentFilter = filter) {
+    const params = new URLSearchParams({
+      view: "admin",
+      page: String(targetPage),
+      pageSize: "20",
+      filter: currentFilter,
+    });
+
+    const res = await fetch(`/api/products?${params.toString()}`, { cache: "no-store" });
     const data = await res.json();
 
-    if (res.ok && data?.success && Array.isArray(data.products)) {
-      setProducts(data.products);
-    }
-  }
-
-  async function loadCategories() {
-    const res = await fetch("/api/categories", { cache: "no-store" });
-    const data = await res.json();
-
-    if (res.ok && data?.success && Array.isArray(data.categories)) {
-      setCategories(data.categories);
+    if (res.ok && data?.success && Array.isArray(data.items)) {
+      setProducts(data.items);
+      setPage(data.page ?? targetPage);
+      setTotalPages(data.totalPages ?? 1);
+      setTotalItems(data.totalItems ?? data.items.length);
     }
   }
 
   useEffect(() => {
-    loadProducts();
-    loadCategories();
-  }, []);
+    let alive = true;
+
+    async function init() {
+      const params = new URLSearchParams({
+        view: "admin",
+        page: "1",
+        pageSize: "20",
+        filter,
+      });
+
+      const [productsRes, categoriesRes] = await Promise.all([
+        fetch(`/api/products?${params.toString()}`, { cache: "no-store" }),
+        fetch("/api/categories", { cache: "no-store" }),
+      ]);
+
+      const productsData = await productsRes.json().catch(() => null);
+      const categoriesData = await categoriesRes.json().catch(() => null);
+
+      if (!alive) return;
+
+      if (productsRes.ok && productsData?.success && Array.isArray(productsData.items)) {
+        setProducts(productsData.items);
+        setPage(productsData.page ?? 1);
+        setTotalPages(productsData.totalPages ?? 1);
+        setTotalItems(productsData.totalItems ?? productsData.items.length);
+      }
+
+      if (categoriesRes.ok && categoriesData?.success && Array.isArray(categoriesData.categories)) {
+        setCategories(categoriesData.categories);
+      }
+    }
+
+    init();
+
+    return () => {
+      alive = false;
+    };
+  }, [filter]);
 
   const selectedCategory = useMemo(
     () => categories.find((c) => String(c.id) === form.categoryId),
@@ -109,77 +151,75 @@ export default function AdminProductsPage() {
     [subcategories, form.subcategoryId]
   );
 
-  const filteredProducts = useMemo(() => {
-    if (filter === "hot") return products.filter((p) => p.isHotDeal);
-    if (filter === "upcoming") return products.filter((p) => p.isUpcoming);
-    if (filter === "discount") {
-      return products.filter(
-        (p) => typeof p.compareAtPrice === "number" && p.compareAtPrice > p.price
-      );
-    }
-    if (filter === "badge") return products.filter((p) => p.badgeText);
-    return products;
-  }, [products, filter]);
-
-  function startEdit(product: Product) {
-    const matchedCategory =
-      categories.find(
-        (c) =>
-          c.name.toLowerCase() === product.category.toLowerCase() ||
-          c.slug === slugify(product.category)
-      ) || null;
-
-    const matchedSubcategory =
-      matchedCategory?.subcategories.find(
-        (s) =>
-          s.slug === slugify(product.subcategory) ||
-          s.name.toLowerCase() === (product.subcategory || "").toLowerCase()
-      ) || null;
-
-    setEditingId(product.id);
+  async function startEdit(product: Product) {
     setMessage("");
-    setImageFile(null);
-    setPreviewUrl(product.image || "");
+    try {
+      const res = await fetch(`/api/products?view=admin&id=${product.id}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      const detail = res.ok && data?.success && data.product ? data.product : product;
 
-    setForm({
-      name: product.name || "",
-      compareAtPrice:
-        product.compareAtPrice === null || product.compareAtPrice === undefined
-          ? ""
-          : String(product.compareAtPrice),
-      image: product.image || "",
-      categoryId: matchedCategory ? String(matchedCategory.id) : "",
-      categoryName: product.category || "",
-      subcategoryId: matchedSubcategory ? String(matchedSubcategory.id) : "",
-      subcategorySlug: product.subcategory || "",
-      description: product.description || "",
-      isHotDeal: Boolean(product.isHotDeal),
-      isUpcoming: Boolean(product.isUpcoming),
-      badgeText: product.badgeText || "",
-      badgeTone: product.badgeTone || "sale",
-    });
+      const matchedCategory =
+        categories.find(
+          (c) =>
+            c.name.toLowerCase() === (detail.category || "").toLowerCase() ||
+            c.slug === slugify(detail.category)
+        ) || null;
 
-    const existingVariants =
-      Array.isArray(product.variants) && product.variants.length > 0
-        ? product.variants.map((v) => ({
-            label: v.label || "",
-            price: String(v.price ?? ""),
-            stock: String(v.stock ?? 0),
-            image: v.image || "",
-            imageFile: null,
-          }))
-        : [
-            {
-              label: "",
-              price: String(product.price ?? ""),
-              stock: String(product.stock ?? 0),
-              image: "",
+      const matchedSubcategory =
+        matchedCategory?.subcategories.find(
+          (s) =>
+            s.slug === slugify(detail.subcategory) ||
+            s.name.toLowerCase() === (detail.subcategory || "").toLowerCase()
+        ) || null;
+
+      setEditingId(detail.id);
+      setImageFile(null);
+      setPreviewUrl(detail.image || "");
+
+      setForm({
+        name: detail.name || "",
+        compareAtPrice:
+          detail.compareAtPrice === null || detail.compareAtPrice === undefined
+            ? ""
+            : String(detail.compareAtPrice),
+        image: detail.image || "",
+        categoryId: matchedCategory ? String(matchedCategory.id) : "",
+        categoryName: detail.category || "",
+        subcategoryId: matchedSubcategory ? String(matchedSubcategory.id) : "",
+        subcategorySlug: detail.subcategory || "",
+        description: detail.description || "",
+        isHotDeal: Boolean(detail.isHotDeal),
+        isUpcoming: Boolean(detail.isUpcoming),
+        badgeText: detail.badgeText || "",
+        badgeTone: detail.badgeTone || "sale",
+      });
+
+      const existingVariants =
+        Array.isArray(detail.variants) && detail.variants.length > 0
+          ? detail.variants.map((v: { label?: string; price?: number; stock?: number; image?: string | null }) => ({
+              label: v.label || "",
+              price: String(v.price ?? ""),
+              stock: String(v.stock ?? 0),
+              image: v.image || "",
               imageFile: null,
-            },
-          ];
+            }))
+          : [
+              {
+                label: "",
+                price: String(detail.price ?? ""),
+                stock: String(detail.stock ?? 0),
+                image: "",
+                imageFile: null,
+              },
+            ];
 
-    setVariants(existingVariants);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+      setVariants(existingVariants);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {
+      setMessage("Failed to load product details for editing.");
+    }
   }
 
   function resetEdit() {
@@ -692,10 +732,8 @@ export default function AdminProductsPage() {
               Product card theke Edit click koro.
             </p>
           )}
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredProducts.map((product) => (
+        </section>        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {products.map((product) => (
             <div
               key={product.id}
               className="rounded-[24px] border border-[#ead9d1] bg-white p-4 shadow-sm"
@@ -716,13 +754,10 @@ export default function AdminProductsPage() {
 
                   <p className="mt-2 font-semibold">৳{product.price}</p>
 
-                  {product.variants?.length ? (
+                  {product.hasVariants || (product.variantCount ?? 0) > 0 ? (
                     <p className="mt-2 text-xs text-[#7a5244]">
-                      {product.variants.length} size option
-                      {product.variants.length > 1 ? "s" : ""}:{" "}
-                      {product.variants
-                        .map((v, i) => `${i === 0 ? "Primary " : ""}${v.label}${v.image ? " ðŸ–¼ï¸" : ""}`)
-                        .join(", ")}
+                      {product.variantCount ?? 0} active size option
+                      {(product.variantCount ?? 0) > 1 ? "s" : ""}
                     </p>
                   ) : null}
                 </div>
@@ -748,6 +783,38 @@ export default function AdminProductsPage() {
             </div>
           ))}
         </section>
+
+        {totalPages > 1 ? (
+          <div className="flex items-center justify-between border-t border-[#ead9d1] pt-6">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => {
+                const prev = Math.max(1, page - 1);
+                setPage(prev);
+                loadProducts(prev, filter);
+              }}
+              className="rounded-full border border-[#ead9d1] bg-white px-5 py-2 text-sm font-semibold text-[#2e221d] disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="text-sm font-medium text-neutral-600">
+              Page {page} of {totalPages} ({totalItems} items)
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => {
+                const next = Math.min(totalPages, page + 1);
+                setPage(next);
+                loadProducts(next, filter);
+              }}
+              className="rounded-full border border-[#ead9d1] bg-white px-5 py-2 text-sm font-semibold text-[#2e221d] disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
       </div>
     </main>
   );

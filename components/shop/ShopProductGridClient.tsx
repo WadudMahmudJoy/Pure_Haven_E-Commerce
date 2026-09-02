@@ -27,8 +27,9 @@ export default function ShopProductGridClient({
 
     const nextPage = page + 1;
     const params = new URLSearchParams({
+      view: "public",
       page: String(nextPage),
-      limit: "40",
+      pageSize: "24",
     });
 
     if (category) params.set("category", category);
@@ -37,7 +38,8 @@ export default function ShopProductGridClient({
     const res = await fetch(`/api/products?${params.toString()}`);
     const data = await res.json();
 
-    setProducts((prev) => [...prev, ...(data.products || [])]);
+    const newItems = data.items || data.products || [];
+    setProducts((prev) => [...prev, ...newItems]);
     setHasMore(Boolean(data.hasMore));
     setPage(nextPage);
     setLoading(false);
@@ -65,14 +67,14 @@ export default function ShopProductGridClient({
             id={product.id}
             name={product.name}
             price={product.price}
-                compareAtPrice={product.compareAtPrice}
+            compareAtPrice={product.compareAtPrice}
             image={product.image}
             category={product.category}
             stock={product.stock}
-                isHotDeal={product.isHotDeal}
-                isUpcoming={product.isUpcoming}
-                badgeText={product.badgeText}
-                badgeTone={product.badgeTone}
+            isHotDeal={product.isHotDeal}
+            isUpcoming={product.isUpcoming}
+            badgeText={product.badgeText}
+            badgeTone={product.badgeTone}
           />
         ))}
       </div>

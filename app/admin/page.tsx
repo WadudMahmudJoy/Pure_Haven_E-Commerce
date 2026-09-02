@@ -1,14 +1,8 @@
-﻿"use client";
+"use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AdminNav from "@/components/admin/AdminNav";
-
-type Product = {
-  id: number;
-  name?: string;
-  stock?: number;
-  isHotDeal?: boolean;
-};
 
 type Order = {
   id: string | number;
@@ -27,14 +21,21 @@ type CustomerMessage = {
   status?: string;
 };
 
-function normalizeArray(data: any, key: string) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.[key])) return data[key];
+function normalizeArray<T>(data: unknown, key: string): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (
+    data &&
+    typeof data === "object" &&
+    Array.isArray((data as Record<string, unknown>)[key])
+  ) {
+    return (data as Record<string, unknown>)[key] as T[];
+  }
   return [];
 }
 
 export default function AdminDashboardPage() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [hotDealsTotal, setHotDealsTotal] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
   const [messages, setMessages] = useState<CustomerMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,17 +43,28 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [productRes, orderRes, messageRes] = await Promise.all([
-          fetch("/api/products", { cache: "no-store" }),
+        const [allProductsRes, hotDealsRes, orderRes, messageRes] = await Promise.all([
+          fetch("/api/products?view=admin&page=1&pageSize=1&filter=all", { cache: "no-store" }),
+          fetch("/api/products?view=admin&page=1&pageSize=1&filter=hot", { cache: "no-store" }),
           fetch("/api/orders", { cache: "no-store" }),
           fetch("/api/customer-messages", { cache: "no-store" }),
         ]);
 
-        const productData = await productRes.json().catch(() => null);
+        const allProductsData = await allProductsRes.json().catch(() => null);
+        const hotDealsData = await hotDealsRes.json().catch(() => null);
         const orderData = await orderRes.json().catch(() => null);
         const messageData = await messageRes.json().catch(() => null);
 
-        setProducts(normalizeArray(productData, "products"));
+        setTotalProducts(
+          typeof allProductsData?.totalItems === "number"
+            ? allProductsData.totalItems
+            : 0
+        );
+        setHotDealsTotal(
+          typeof hotDealsData?.totalItems === "number"
+            ? hotDealsData.totalItems
+            : 0
+        );
         setOrders(normalizeArray(orderData, "orders"));
         setMessages(normalizeArray(messageData, "messages"));
       } finally {
@@ -79,17 +91,17 @@ export default function AdminDashboardPage() {
     }, 0);
 
     return {
-      totalProducts: products.length,
+      totalProducts,
       totalOrders: orders.length,
       pendingOrders: orders.filter((order) =>
         String(order.status || order.orderStatus || "").toLowerCase().includes("pending")
       ).length,
       newMessages: messages.filter((message) => message.status === "new").length,
-      lowStock: products.filter((product) => Number(product.stock ?? 0) <= 3).length,
-      hotDeals: products.filter((product) => product.isHotDeal).length,
+      lowStock: 0,
+      hotDeals: hotDealsTotal,
       totalSales,
     };
-  }, [products, orders, messages]);
+  }, [totalProducts, hotDealsTotal, orders, messages]);
 
   return (
     <main className="min-h-screen bg-[#fcf8f6] px-4 py-10">
@@ -128,12 +140,12 @@ export default function AdminDashboardPage() {
             </h2>
 
             <div className="mt-5 flex flex-wrap gap-3">
-              <a
+              <Link
                 href="/"
                 className="rounded-full border border-[#ead9d1] px-5 py-3 text-sm font-semibold text-[#2e221d] hover:bg-[#f8f3ef]"
               >
                 Go to Home Page
-              </a>
+              </Link>
 
               <a
                 href="/admin/products/add"

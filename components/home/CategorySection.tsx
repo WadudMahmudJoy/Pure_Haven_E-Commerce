@@ -305,12 +305,13 @@ export default function CategorySection({
         }
       }
 
+      const productList = productPayload?.data?.items || productPayload?.data?.products;
       if (
         productPayload?.ok &&
         productPayload.data?.success &&
-        Array.isArray(productPayload.data.products)
+        Array.isArray(productList)
       ) {
-        setProducts(normalizeProducts(productPayload.data.products));
+        setProducts(normalizeProducts(productList));
       }
     }
 
