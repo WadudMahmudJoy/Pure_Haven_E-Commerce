@@ -1,4 +1,4 @@
-﻿-- Sync current Prisma schema with existing database.
+-- Sync current Prisma schema with existing database.
 -- Safe additive migration for Pure Haven BD.
 
 -- Product fields missing from earlier migrations
