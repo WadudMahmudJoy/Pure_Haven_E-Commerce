@@ -312,7 +312,10 @@ export default function ProgressiveProductGrid({
             price={product.price}
             compareAtPrice={product.compareAtPrice}
             image={product.image}
+            images={product.images}
             category={product.category}
+            categoryName={product.categoryName}
+            subcategoryName={product.subcategoryName}
             stock={product.stock}
             isHotDeal={product.isHotDeal}
             isUpcoming={product.isUpcoming}

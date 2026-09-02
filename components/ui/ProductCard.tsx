@@ -7,27 +7,28 @@ import { useCart } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
 import SafeImage from "@/components/ui/SafeImage";
 import { normalizeImageSrc } from "@/lib/imagePaths";
+import {
+  resolveEyebrow,
+  resolveCardBadge,
+  resolveCardCTA,
+  formatCardPrice,
+} from "./productCardPresentation";
 
-type ProductCardProps = {
+export type ProductCardProps = {
   id: number;
   name: string;
   price: number;
   compareAtPrice?: number | null;
   image: string;
+  images?: string[];
   category: string;
+  categoryName?: string | null;
+  subcategoryName?: string | null;
   stock?: number;
   isHotDeal?: boolean;
   isUpcoming?: boolean;
   badgeText?: string | null;
   badgeTone?: string | null;
-};
-
-const badgeStyles: Record<string, string> = {
-  sale: "bg-red-600 text-white",
-  new: "bg-green-600 text-white",
-  offer: "bg-[#f58b19] text-white",
-  hot: "bg-[#2e221d] text-white",
-  festival: "bg-purple-600 text-white",
 };
 
 export default function ProductCard(props: ProductCardProps) {
@@ -41,12 +42,17 @@ export default function ProductCard(props: ProductCardProps) {
     compareAtPrice,
     image,
     category,
+    categoryName,
+    subcategoryName,
     stock,
     isHotDeal,
     isUpcoming,
     badgeText,
     badgeTone,
   } = props;
+
+  // images is data-only in Task 6 (single image rendering)
+  void props.images;
 
   const [justAddedToCart, setJustAddedToCart] = useState(false);
   const [wishlistTouched, setWishlistTouched] = useState(false);
@@ -59,7 +65,6 @@ export default function ProductCard(props: ProductCardProps) {
   const isOutOfStock = hasKnownStock && stock <= 0;
   const isLowStock = hasKnownStock && stock > 0 && stock <= 5;
   const reachedStockLimit = hasKnownStock && stock > 0 && currentQty >= stock;
-  const addDisabled = isOutOfStock || reachedStockLimit;
 
   const hasDiscountPrice =
     typeof compareAtPrice === "number" && compareAtPrice > price;
@@ -70,20 +75,27 @@ export default function ProductCard(props: ProductCardProps) {
     category,
   });
 
-  const visibleBadge = useMemo(() => {
-    if (badgeText && badgeText.trim()) return badgeText.trim();
-    if (isHotDeal) return "Hot Deal";
-    if (isUpcoming) return "Upcoming";
-    return "";
-  }, [badgeText, isHotDeal, isUpcoming]);
+  const eyebrow = resolveEyebrow(categoryName, subcategoryName);
 
-  const visibleBadgeTone = badgeText
-    ? badgeTone || "sale"
-    : isHotDeal
-    ? "hot"
-    : "new";
+  const cardBadge = useMemo(() => {
+    return resolveCardBadge({
+      stock,
+      isOutOfStock,
+      isLowStock,
+      isHotDeal,
+      isUpcoming,
+      badgeText,
+      badgeTone,
+    });
+  }, [stock, isOutOfStock, isLowStock, isHotDeal, isUpcoming, badgeText, badgeTone]);
 
-  const badgeClass = badgeStyles[visibleBadgeTone] || badgeStyles.sale;
+  const cta = resolveCardCTA({
+    isOutOfStock,
+    reachedStockLimit,
+    justAddedToCart,
+  });
+
+  const addDisabled = cta.disabled;
 
   useEffect(() => {
     if (!justAddedToCart) return;
@@ -104,14 +116,6 @@ export default function ProductCard(props: ProductCardProps) {
 
     return () => window.clearTimeout(timer);
   }, [wishlistTouched]);
-
-  const cartButtonText = isOutOfStock
-    ? "Out of Stock"
-    : reachedStockLimit
-    ? "Limit Reached"
-    : justAddedToCart
-    ? "Added"
-    : "Add to Cart";
 
   function handleWishlistClick(e: React.MouseEvent<HTMLButtonElement>) {
     e.preventDefault();
@@ -160,19 +164,11 @@ export default function ProductCard(props: ProductCardProps) {
           </div>
         </Link>
 
-        {visibleBadge ? (
+        {cardBadge ? (
           <span
-            className={`absolute left-2 top-2 z-20 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] shadow-sm sm:text-[11px] ${badgeClass}`}
+            className={`absolute left-2 top-2 z-20 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] shadow-sm sm:text-[11px] ${cardBadge.className}`}
           >
-            {visibleBadge}
-          </span>
-        ) : isOutOfStock ? (
-          <span className="absolute left-2 top-2 z-20 rounded-full border border-red-200 bg-red-50/95 px-2.5 py-1 text-[10px] font-semibold text-red-600 shadow-sm sm:text-[11px]">
-            Out of Stock
-          </span>
-        ) : isLowStock ? (
-          <span className="absolute left-2 top-2 z-20 rounded-full border border-amber-200 bg-amber-50/95 px-2.5 py-1 text-[10px] font-semibold text-amber-700 shadow-sm sm:text-[11px]">
-            Low Stock
+            {cardBadge.label}
           </span>
         ) : null}
 
@@ -202,20 +198,14 @@ export default function ProductCard(props: ProductCardProps) {
       </div>
 
       <div className="pt-2.5 sm:pt-3 lg:pt-4">
-        <div className="flex items-start justify-between gap-2">
-          <span className="max-w-[70%] truncate rounded-full bg-[#f8f3ef] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-[#7a5244] sm:px-2.5 sm:py-1 sm:text-[10px] lg:text-[11px]">
-            {category}
-          </span>
-
-          {hasKnownStock ? (
-            <span className="hidden text-[10px] font-medium text-neutral-500 sm:inline lg:text-[11px]">
-              Stock: {stock}
-            </span>
-          ) : null}
-        </div>
+        {eyebrow ? (
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#8b5a45] truncate sm:text-[11px]">
+            {eyebrow}
+          </p>
+        ) : null}
 
         <Link href={`/product/${id}`} className="block">
-          <h3 className="mt-2 line-clamp-2 min-h-[2.5rem] text-[15px] font-semibold leading-5 text-[#2e221d] transition group-hover:text-[#7a5244] sm:min-h-[2.8rem] sm:text-base sm:leading-6 lg:min-h-[3.1rem] lg:text-lg">
+          <h3 className="mt-1 line-clamp-2 min-h-[2.5rem] text-[15px] font-semibold leading-5 text-[#2e221d] transition group-hover:text-[#7a5244] sm:min-h-[2.8rem] sm:text-base sm:leading-6 lg:min-h-[3.1rem] lg:text-lg">
             {name}
           </h3>
         </Link>
@@ -224,12 +214,12 @@ export default function ProductCard(props: ProductCardProps) {
           <div className="flex flex-wrap items-baseline gap-2">
             {oldPrice ? (
               <p className="text-sm font-medium text-neutral-400 line-through sm:text-base">
-                {"\u09F3"}{oldPrice}
+                {formatCardPrice(oldPrice)}
               </p>
             ) : null}
 
             <p className="text-lg font-semibold tracking-tight text-[#2e221d] sm:text-xl">
-              {"\u09F3"}{price}
+              {formatCardPrice(price)}
             </p>
           </div>
 
@@ -258,7 +248,7 @@ export default function ProductCard(props: ProductCardProps) {
             ) : (
               <ShoppingCart className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             )}
-            <span className="truncate">{cartButtonText}</span>
+            <span className="truncate">{cta.label}</span>
           </button>
         </div>
       </div>

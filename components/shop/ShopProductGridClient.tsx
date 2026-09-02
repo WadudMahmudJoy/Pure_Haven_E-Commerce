@@ -62,6 +62,7 @@ export default function ShopProductGridClient({
     <>
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 lg:gap-6">
         {products.map((product) => (
+          /* Preserves local mapping architecture: Product source does not expose Task-4 fields */
           <ProductCard
             key={product.id}
             id={product.id}
