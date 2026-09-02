@@ -132,6 +132,7 @@ model Product {
   updatedAt      DateTime         @updatedAt
   categoryRel    Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   variants       ProductVariant[]
+  images         ProductImage[]
 
   @@index([isActive, deletedAt])
   @@index([categoryId])
@@ -156,6 +157,18 @@ model ProductVariant {
   updatedAt DateTime @updatedAt
 
   @@index([productId, isActive])
+}
+
+model ProductImage {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, sortOrder])
 }
 
 enum OrderStatus {
