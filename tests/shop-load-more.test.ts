@@ -144,7 +144,7 @@ describe("Phase 5 Task 6 / 6B — Shop Server Component & Progressive Load More 
     assert.strictEqual(state.error, null);
   });
 
-  it("5. applyProgressivePageSuccess merges deduplicated items, updates page, and clears error/loading", () => {
+  it("5. applyProgressivePageSuccess merges deduplicated items, updates page, clears error, and PRESERVES loading state", () => {
     const initialState: ProgressiveGridState = {
       products: [
         {
@@ -198,11 +198,15 @@ describe("Phase 5 Task 6 / 6B — Shop Server Component & Progressive Load More 
     assert.strictEqual(nextState.currentPage, 2);
     assert.strictEqual(nextState.hasMore, true);
     assert.strictEqual(nextState.totalItems, 48);
-    assert.strictEqual(nextState.loading, false);
+    assert.strictEqual(
+      nextState.loading,
+      true,
+      "applyProgressivePageSuccess must PRESERVE loading=true (operation lifecycle owns completion)"
+    );
     assert.strictEqual(nextState.error, null);
   });
 
-  it("6. applyProgressivePageFailure retains previous products and currentPage while setting error and clearing loading", () => {
+  it("6. applyProgressivePageFailure retains previous products, currentPage, and PRESERVES loading state while setting error", () => {
     const currentState: ProgressiveGridState = {
       products: [
         {
@@ -234,7 +238,11 @@ describe("Phase 5 Task 6 / 6B — Shop Server Component & Progressive Load More 
 
     assert.strictEqual(failureState.products.length, 1);
     assert.strictEqual(failureState.currentPage, 1, "currentPage must NOT advance on failure");
-    assert.strictEqual(failureState.loading, false);
+    assert.strictEqual(
+      failureState.loading,
+      true,
+      "applyProgressivePageFailure must PRESERVE loading=true (operation lifecycle owns completion)"
+    );
     assert.strictEqual(failureState.error, "Network error loading page 2");
   });
 
@@ -579,7 +587,22 @@ describe("Phase 5 Task 6 / 6B — Shop Server Component & Progressive Load More 
 
     // Restoration uses replaceState, Load More uses pushState
     assert.ok(content.includes("window.history.replaceState"), "Restoration must use replaceState");
-    assert.ok(content.includes("window.history.pushState"), "Load More must use pushState");
+    // Operation lifecycle owns loading finalization in finally blocks
+    const handleLoadMoreMatch = content.match(/async function handleLoadMore\(\)[\s\S]*?(?=const\s+\{)/);
+    assert.ok(handleLoadMoreMatch, "handleLoadMore function must be defined");
+    assert.ok(
+      handleLoadMoreMatch[0].includes("finally") &&
+        handleLoadMoreMatch[0].includes("loading: false"),
+      "handleLoadMore must contain operation-level finally block clearing loading: false"
+    );
+
+    const restorePagesMatch = content.match(/async function restorePages\(\)[\s\S]*?(?=restorePages\(\))/);
+    assert.ok(restorePagesMatch, "restorePages function must be defined");
+    assert.ok(
+      restorePagesMatch[0].includes("finally") &&
+        restorePagesMatch[0].includes("loading: false"),
+      "restorePages must contain operation-level finally block clearing loading: false"
+    );
 
     // Browser history must never receive /api/products pathname
     assert.ok(

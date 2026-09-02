@@ -190,6 +190,9 @@ export default function ProgressiveProductGrid({
         if (!isAborted && isCurrentGeneration(requestGenRef.current, currentGen)) {
           setGridState((prev) => ({ ...prev, loading: false }));
         }
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
       }
     }
 
@@ -272,6 +275,13 @@ export default function ProgressiveProductGrid({
             )
           );
         }
+      }
+    } finally {
+      if (isCurrentGeneration(requestGenRef.current, currentGen)) {
+        setGridState((prev) => ({ ...prev, loading: false }));
+      }
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
       }
     }
   }

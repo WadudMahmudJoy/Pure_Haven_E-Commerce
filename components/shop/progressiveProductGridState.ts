@@ -84,11 +84,11 @@ export function applyProgressivePageSuccess(
   incomingTotalItems?: number
 ): ProgressiveGridState {
   return {
+    ...current,
     products: deduplicateProducts(current.products, incomingItems),
     currentPage: incomingPage,
     hasMore: incomingHasMore,
     totalItems: incomingTotalItems ?? current.totalItems,
-    loading: false,
     error: null,
   };
 }
@@ -99,7 +99,6 @@ export function applyProgressivePageFailure(
 ): ProgressiveGridState {
   return {
     ...current,
-    loading: false,
     error: errorMessage,
   };
 }
