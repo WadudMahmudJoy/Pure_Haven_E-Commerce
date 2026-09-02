@@ -64,6 +64,7 @@ export type AdminProductVariantDTO = {
 };
 
 export type AdminProductDetailDTO = AdminProductListDTO & {
+  images: string[];
   description: string | null;
   deletedAt: string | null;
   updatedAt: string;

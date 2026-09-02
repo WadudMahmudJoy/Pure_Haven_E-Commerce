@@ -132,6 +132,12 @@ export async function getAdminProductDetailQuery(
       variants: {
         orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
       },
+      images: {
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+        select: {
+          url: true,
+        },
+      },
     },
   });
 
@@ -145,6 +151,10 @@ export async function getAdminProductDetailQuery(
     price: Number(product.price),
     compareAtPrice: product.compareAtPrice !== null ? Number(product.compareAtPrice) : null,
     image: product.image,
+    images:
+      product.images.length > 0
+        ? product.images.map((img) => img.url)
+        : [product.image],
     category: product.category,
     categoryId: product.categoryId,
     subcategory: product.subcategory,
