@@ -61,6 +61,21 @@ export function createShopHistoryUrl(options: {
   return qs ? `/shop?${qs}` : "/shop";
 }
 
+export function createInitialProgressiveGridState(params: {
+  initialProducts: PublicProductCardDTO[];
+  initialHasMore: boolean;
+  initialTotalItems: number;
+}): ProgressiveGridState {
+  return {
+    products: params.initialProducts,
+    currentPage: 1,
+    hasMore: params.initialHasMore,
+    totalItems: params.initialTotalItems,
+    loading: false,
+    error: null,
+  };
+}
+
 export function applyProgressivePageSuccess(
   current: ProgressiveGridState,
   incomingItems: PublicProductCardDTO[],

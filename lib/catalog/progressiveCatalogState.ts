@@ -66,6 +66,7 @@ export function createProgressiveQueryUrl(
   const params = new URLSearchParams();
 
   params.set("view", "public");
+  params.set("pageSize", "24");
 
   if (options.category && options.category.trim() !== "") {
     params.set("category", options.category.trim().toLowerCase());

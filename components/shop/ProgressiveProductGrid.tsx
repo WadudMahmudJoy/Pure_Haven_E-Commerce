@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import ProductCard from "@/components/ui/ProductCard";
 import type { PublicProductCardDTO, PublicSortMode } from "@/lib/catalog/types";
 import {
-  deduplicateProducts,
   computeRestorationTarget,
   createProgressiveQueryUrl,
   nextRequestGeneration,
@@ -13,6 +12,10 @@ import {
 import {
   createProgressiveQueryIdentity,
   createShopHistoryUrl,
+  createInitialProgressiveGridState,
+  applyProgressivePageSuccess,
+  applyProgressivePageFailure,
+  type ProgressiveGridState,
 } from "./progressiveProductGridState";
 
 export type ProgressiveProductGridProps = {
@@ -45,29 +48,46 @@ export default function ProgressiveProductGrid({
     sort,
   });
 
-  const [prevIdentity, setPrevIdentity] = useState<string>(currentIdentity);
-  const [products, setProducts] = useState<PublicProductCardDTO[]>(initialProducts);
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
-  const [totalItems, setTotalItems] = useState<number>(initialTotalItems);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [gridState, setGridState] = useState<ProgressiveGridState>(() =>
+    createInitialProgressiveGridState({
+      initialProducts,
+      initialHasMore,
+      initialTotalItems,
+    })
+  );
 
+  const identityRef = useRef<string>(currentIdentity);
   const requestGenRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Explicit state reset when authoritative query identity changes
-  if (prevIdentity !== currentIdentity) {
-    setPrevIdentity(currentIdentity);
-    setProducts(initialProducts);
-    setCurrentPage(1);
-    setHasMore(initialHasMore);
-    setTotalItems(initialTotalItems);
-    setLoading(false);
-    setError(null);
-  }
+  // Effect A: Explicit query-identity lifecycle transition
+  useEffect(() => {
+    if (identityRef.current !== currentIdentity) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      requestGenRef.current = nextRequestGeneration(requestGenRef.current);
+      identityRef.current = currentIdentity;
 
-  // Truthful restoration lifecycle for requestedPage > 1 on mount or identity transition
+      setGridState(
+        createInitialProgressiveGridState({
+          initialProducts,
+          initialHasMore,
+          initialTotalItems,
+        })
+      );
+    }
+  }, [currentIdentity, initialProducts, initialHasMore, initialTotalItems]);
+
+  // Effect B: Component unmount cleanup
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      requestGenRef.current = nextRequestGeneration(requestGenRef.current);
+    };
+  }, []);
+
+  // Effect C: Truthful restoration lifecycle for requestedPage > 1
   useEffect(() => {
     if (!requestedPage || requestedPage <= 1) return;
 
@@ -78,15 +98,24 @@ export default function ProgressiveProductGrid({
     const currentGen = nextRequestGeneration(requestGenRef.current);
     requestGenRef.current = currentGen;
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    // Canonicalize customer URL to truthful Page 1 BEFORE requesting Page 2
+    if (typeof window !== "undefined") {
+      const page1Url = createShopHistoryUrl({
+        category,
+        subcategory,
+        q,
+        sort,
+        page: 1,
+      });
+      window.history.replaceState(null, "", page1Url);
+    }
+
     async function restorePages() {
-      setLoading(true);
-      setError(null);
+      setGridState((prev) => ({ ...prev, loading: true, error: null }));
 
       try {
         for (let p = 2; p <= restoration.targetPage; p++) {
@@ -120,10 +149,15 @@ export default function ProgressiveProductGrid({
           }
 
           const resolvedPage = data.page ?? p;
-          setProducts((prev) => deduplicateProducts(prev, data.items));
-          setCurrentPage(resolvedPage);
-          setHasMore(Boolean(data.hasMore));
-          setTotalItems(data.totalItems ?? initialTotalItems);
+          setGridState((prev) =>
+            applyProgressivePageSuccess(
+              prev,
+              data.items,
+              resolvedPage,
+              Boolean(data.hasMore),
+              data.totalItems
+            )
+          );
 
           // Truthful restoration history update using replaceState
           if (typeof window !== "undefined") {
@@ -143,11 +177,18 @@ export default function ProgressiveProductGrid({
         }
       } catch (err: unknown) {
         if ((err as Error)?.name !== "AbortError" && !isAborted) {
-          setError("Some products could not be restored. Click Load More to continue.");
+          if (isCurrentGeneration(requestGenRef.current, currentGen)) {
+            setGridState((prev) =>
+              applyProgressivePageFailure(
+                prev,
+                "Some products could not be restored. Click Load More to continue."
+              )
+            );
+          }
         }
       } finally {
         if (!isAborted && isCurrentGeneration(requestGenRef.current, currentGen)) {
-          setLoading(false);
+          setGridState((prev) => ({ ...prev, loading: false }));
         }
       }
     }
@@ -158,23 +199,20 @@ export default function ProgressiveProductGrid({
       isAborted = true;
       controller.abort();
     };
-  }, [currentIdentity, requestedPage, category, subcategory, q, sort, initialTotalItems]);
+  }, [currentIdentity, requestedPage, category, subcategory, q, sort]);
 
   async function handleLoadMore() {
-    if (loading || !hasMore) return;
+    if (gridState.loading || !gridState.hasMore) return;
 
-    const nextPage = currentPage + 1;
+    const nextPage = gridState.currentPage + 1;
     const currentGen = nextRequestGeneration(requestGenRef.current);
     requestGenRef.current = currentGen;
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    setLoading(true);
-    setError(null);
+    setGridState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
       const queryUrl = createProgressiveQueryUrl({
@@ -203,12 +241,15 @@ export default function ProgressiveProductGrid({
       }
 
       const resolvedPage = data.page ?? nextPage;
-      setProducts((prev) => deduplicateProducts(prev, data.items));
-      setCurrentPage(resolvedPage);
-      setHasMore(Boolean(data.hasMore));
-      if (typeof data.totalItems === "number") {
-        setTotalItems(data.totalItems);
-      }
+      setGridState((prev) =>
+        applyProgressivePageSuccess(
+          prev,
+          data.items,
+          resolvedPage,
+          Boolean(data.hasMore),
+          data.totalItems
+        )
+      );
 
       // Synchronize customer-visible browser history path using pushState
       if (typeof window !== "undefined") {
@@ -223,14 +264,19 @@ export default function ProgressiveProductGrid({
       }
     } catch (err: unknown) {
       if ((err as Error)?.name !== "AbortError") {
-        setError("Failed to load more products. Please try again.");
-      }
-    } finally {
-      if (isCurrentGeneration(requestGenRef.current, currentGen)) {
-        setLoading(false);
+        if (isCurrentGeneration(requestGenRef.current, currentGen)) {
+          setGridState((prev) =>
+            applyProgressivePageFailure(
+              prev,
+              "Failed to load more products. Please try again."
+            )
+          );
+        }
       }
     }
   }
+
+  const { products, hasMore, totalItems, loading, error } = gridState;
 
   if (products.length === 0 && !loading) {
     return (

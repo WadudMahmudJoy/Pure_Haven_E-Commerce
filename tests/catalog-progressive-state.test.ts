@@ -94,7 +94,7 @@ describe("Task 1 — Progressive Catalog State Unit Tests", () => {
   });
 
   describe("Progressive Query URL Construction", () => {
-    it("builds query URL string preserving category, subcategory, search, sort, and page", () => {
+    it("builds query URL string preserving category, subcategory, search, sort, page and explicit pageSize=24", () => {
       const url = createProgressiveQueryUrl({
         category: "skincare",
         subcategory: "serum",
@@ -103,13 +103,20 @@ describe("Task 1 — Progressive Catalog State Unit Tests", () => {
         page: 2,
       });
 
-      assert.strictEqual(
-        url,
-        "/api/products?view=public&category=skincare&subcategory=serum&q=cream&sort=price-asc&page=2"
-      );
+      assert.ok(url.startsWith("/api/products?"), "URL must start with /api/products?");
+      const query = url.split("?")[1] ?? "";
+      const params = new URLSearchParams(query);
+
+      assert.strictEqual(params.get("view"), "public");
+      assert.strictEqual(params.get("pageSize"), "24");
+      assert.strictEqual(params.get("category"), "skincare");
+      assert.strictEqual(params.get("subcategory"), "serum");
+      assert.strictEqual(params.get("q"), "cream");
+      assert.strictEqual(params.get("sort"), "price-asc");
+      assert.strictEqual(params.get("page"), "2");
     });
 
-    it("omits empty or null filter parameters from the URL", () => {
+    it("omits empty or null filter parameters from the URL while preserving view and pageSize", () => {
       const url = createProgressiveQueryUrl({
         category: "skincare",
         subcategory: null,
@@ -118,7 +125,17 @@ describe("Task 1 — Progressive Catalog State Unit Tests", () => {
         page: 1,
       });
 
-      assert.strictEqual(url, "/api/products?view=public&category=skincare&sort=latest&page=1");
+      assert.ok(url.startsWith("/api/products?"));
+      const query = url.split("?")[1] ?? "";
+      const params = new URLSearchParams(query);
+
+      assert.strictEqual(params.get("view"), "public");
+      assert.strictEqual(params.get("pageSize"), "24");
+      assert.strictEqual(params.get("category"), "skincare");
+      assert.strictEqual(params.get("sort"), "latest");
+      assert.strictEqual(params.get("page"), "1");
+      assert.strictEqual(params.has("subcategory"), false);
+      assert.strictEqual(params.has("q"), false);
     });
   });
 });
