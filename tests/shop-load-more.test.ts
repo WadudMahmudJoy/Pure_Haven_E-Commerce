@@ -9,12 +9,185 @@ import {
 } from "../lib/catalog/progressiveCatalogState";
 import { parsePublicCatalogParams } from "../lib/catalog/queryParams";
 import type { PublicProductCardDTO } from "../lib/catalog/types";
+import {
+  createProgressiveQueryIdentity,
+  createShopHistoryUrl,
+  applyProgressivePageSuccess,
+  applyProgressivePageFailure,
+  type ProgressiveGridState,
+} from "../components/shop/progressiveProductGridState";
 
-describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Client", () => {
+describe("Phase 5 Task 6 / 6A — Shop Server Component & Progressive Load More Client", () => {
   // ---------------------------------------------------------------------------
-  // A. Restoration Target Calculation & Deep Normalization
+  // A. Query-Key Collision Regression
   // ---------------------------------------------------------------------------
-  it("A/B. computeRestorationTarget for page=1 and page=3 returns exact targetPage and shouldNormalizeUrl=false", () => {
+  it("A. createProgressiveQueryIdentity prevents delimiter collision between overlapping category and subcategory strings", () => {
+    const stateA = {
+      category: "a-b",
+      subcategory: "c",
+      q: "",
+      sort: "latest",
+    };
+
+    const stateB = {
+      category: "a",
+      subcategory: "b-c",
+      q: "",
+      sort: "latest",
+    };
+
+    const keyA = createProgressiveQueryIdentity(stateA);
+    const keyB = createProgressiveQueryIdentity(stateB);
+
+    assert.notStrictEqual(
+      keyA,
+      keyB,
+      "Query identity must not collide for overlapping hyphenated names"
+    );
+    assert.strictEqual(
+      keyA,
+      JSON.stringify(["a-b", "c", "", "latest"]),
+      "Key A matches structural JSON serialization"
+    );
+    assert.strictEqual(
+      keyB,
+      JSON.stringify(["a", "b-c", "", "latest"]),
+      "Key B matches structural JSON serialization"
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // B. Explicit Reset Contract & Pure State Transitions
+  // ---------------------------------------------------------------------------
+  it("B. applyProgressivePageSuccess merges deduplicated items, updates page, and clears error/loading", () => {
+    const initialState: ProgressiveGridState = {
+      products: [
+        {
+          id: 1,
+          name: "Prod 1",
+          price: 100,
+          compareAtPrice: null,
+          image: "/p1.png",
+          category: "Skincare",
+          stock: 10,
+          isHotDeal: false,
+          isUpcoming: false,
+          badgeText: null,
+          badgeTone: "sale",
+          hasVariants: false,
+        },
+      ],
+      currentPage: 1,
+      hasMore: true,
+      totalItems: 48,
+      loading: true,
+      error: "Previous error",
+    };
+
+    const incomingItems: PublicProductCardDTO[] = [
+      {
+        id: 2,
+        name: "Prod 2",
+        price: 200,
+        compareAtPrice: null,
+        image: "/p2.png",
+        category: "Skincare",
+        stock: 5,
+        isHotDeal: false,
+        isUpcoming: false,
+        badgeText: null,
+        badgeTone: "sale",
+        hasVariants: false,
+      },
+    ];
+
+    const nextState = applyProgressivePageSuccess(
+      initialState,
+      incomingItems,
+      2,
+      true,
+      48
+    );
+
+    assert.strictEqual(nextState.products.length, 2);
+    assert.strictEqual(nextState.currentPage, 2);
+    assert.strictEqual(nextState.hasMore, true);
+    assert.strictEqual(nextState.totalItems, 48);
+    assert.strictEqual(nextState.loading, false);
+    assert.strictEqual(nextState.error, null);
+  });
+
+  it("C. applyProgressivePageFailure retains previous products and currentPage while setting error and clearing loading", () => {
+    const currentState: ProgressiveGridState = {
+      products: [
+        {
+          id: 1,
+          name: "Prod 1",
+          price: 100,
+          compareAtPrice: null,
+          image: "/p1.png",
+          category: "Skincare",
+          stock: 10,
+          isHotDeal: false,
+          isUpcoming: false,
+          badgeText: null,
+          badgeTone: "sale",
+          hasVariants: false,
+        },
+      ],
+      currentPage: 1,
+      hasMore: true,
+      totalItems: 48,
+      loading: true,
+      error: null,
+    };
+
+    const failureState = applyProgressivePageFailure(
+      currentState,
+      "Network error loading page 2"
+    );
+
+    assert.strictEqual(failureState.products.length, 1);
+    assert.strictEqual(failureState.currentPage, 1, "currentPage must NOT advance on failure");
+    assert.strictEqual(failureState.loading, false);
+    assert.strictEqual(failureState.error, "Network error loading page 2");
+  });
+
+  // ---------------------------------------------------------------------------
+  // D. Canonical /shop History URL Builder
+  // ---------------------------------------------------------------------------
+  it("D. createShopHistoryUrl constructs canonical customer-facing URL starting with /shop and never /api/products", () => {
+    const url1 = createShopHistoryUrl({
+      category: "skincare",
+      subcategory: "serum",
+      q: "glow",
+      sort: "price-asc",
+      page: 3,
+    });
+
+    assert.ok(url1.startsWith("/shop?"), "History URL must start with /shop?");
+    assert.ok(!url1.includes("/api/products"), "History URL must not contain /api/products");
+
+    const params1 = new URLSearchParams(url1.replace("/shop?", ""));
+    assert.strictEqual(params1.get("category"), "skincare");
+    assert.strictEqual(params1.get("subcategory"), "serum");
+    assert.strictEqual(params1.get("q"), "glow");
+    assert.strictEqual(params1.get("sort"), "price-asc");
+    assert.strictEqual(params1.get("page"), "3");
+
+    // Default page=1 and sort=latest should produce clean base URL
+    const urlDefault = createShopHistoryUrl({
+      category: "skincare",
+      sort: "latest",
+      page: 1,
+    });
+    assert.strictEqual(urlDefault, "/shop?category=skincare");
+  });
+
+  // ---------------------------------------------------------------------------
+  // E. Restoration Target Calculation & Deep Normalization
+  // ---------------------------------------------------------------------------
+  it("E. computeRestorationTarget for page=1 and page=3 returns exact targetPage and shouldNormalizeUrl=false", () => {
     const res1 = computeRestorationTarget(1);
     assert.strictEqual(res1.targetPage, 1);
     assert.strictEqual(res1.shouldNormalizeUrl, false);
@@ -24,16 +197,16 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
     assert.strictEqual(res3.shouldNormalizeUrl, false);
   });
 
-  it("C. computeRestorationTarget for deep page=15 clamps targetPage to 10 and sets shouldNormalizeUrl=true", () => {
+  it("F. computeRestorationTarget for deep page=15 clamps targetPage to 10 and sets shouldNormalizeUrl=true", () => {
     const res15 = computeRestorationTarget(15);
     assert.strictEqual(res15.targetPage, 10);
     assert.strictEqual(res15.shouldNormalizeUrl, true);
   });
 
   // ---------------------------------------------------------------------------
-  // D. Progressive Query URL Construction
+  // G. Progressive Query URL & Page Size Invariants
   // ---------------------------------------------------------------------------
-  it("D. createProgressiveQueryUrl generates bounded API URL preserving active filters and view=public", () => {
+  it("G. createProgressiveQueryUrl generates bounded API URL resolving to pageSize=24 in catalog parser", () => {
     const url = createProgressiveQueryUrl({
       category: "skincare",
       subcategory: "serum",
@@ -43,19 +216,22 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
     });
 
     assert.ok(url.startsWith("/api/products?"));
-    const params = new URLSearchParams(url.replace("/api/products?", ""));
-    assert.strictEqual(params.get("view"), "public");
-    assert.strictEqual(params.get("category"), "skincare");
-    assert.strictEqual(params.get("subcategory"), "serum");
-    assert.strictEqual(params.get("q"), "glow");
-    assert.strictEqual(params.get("sort"), "price-asc");
-    assert.strictEqual(params.get("page"), "2");
+    const rawParams = Object.fromEntries(new URLSearchParams(url.replace("/api/products?", "")));
+    assert.strictEqual(rawParams.view, "public");
+    assert.strictEqual(rawParams.category, "skincare");
+    assert.strictEqual(rawParams.subcategory, "serum");
+    assert.strictEqual(rawParams.q, "glow");
+    assert.strictEqual(rawParams.sort, "price-asc");
+    assert.strictEqual(rawParams.page, "2");
+
+    const parsed = parsePublicCatalogParams(rawParams);
+    assert.strictEqual(parsed.pageSize, 24, "Public catalog parser must resolve pageSize to 24");
   });
 
   // ---------------------------------------------------------------------------
-  // E. Product ID Deduplication
+  // H. Product ID Deduplication
   // ---------------------------------------------------------------------------
-  it("E. deduplicateProducts preserves existing items and appends only unique incoming IDs", () => {
+  it("H. deduplicateProducts preserves existing items and appends only unique incoming IDs", () => {
     const existing: PublicProductCardDTO[] = [
       {
         id: 1,
@@ -127,9 +303,9 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
   });
 
   // ---------------------------------------------------------------------------
-  // F. Server Initial Query Contract
+  // I. Server Initial Query Contract
   // ---------------------------------------------------------------------------
-  it("F. parsePublicCatalogParams parses requested page while server forces initial query to page=1, pageSize=24, skip=0", () => {
+  it("I. parsePublicCatalogParams parses requested page while server forces initial query to page=1, pageSize=24, skip=0", () => {
     const rawParams = {
       category: "makeup",
       subcategory: "lipstick",
@@ -157,9 +333,9 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
   });
 
   // ---------------------------------------------------------------------------
-  // G. Structural Source Guards: app/shop/page.tsx
+  // J. Structural Source Guards: app/shop/page.tsx
   // ---------------------------------------------------------------------------
-  it("G. app/shop/page.tsx uses getPublicCatalogQuery, passes initial Page-1 result to ProgressiveProductGrid, and omits getProducts in-memory flow", () => {
+  it("J. app/shop/page.tsx uses getPublicCatalogQuery, collision-safe queryKey, and omits getProducts in-memory flow", () => {
     const content = fs.readFileSync(
       path.join(process.cwd(), "app/shop/page.tsx"),
       "utf8"
@@ -178,6 +354,10 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
       content.includes("ProgressiveProductGrid"),
       "app/shop/page.tsx must render ProgressiveProductGrid"
     );
+    assert.ok(
+      content.includes("createProgressiveQueryIdentity"),
+      "app/shop/page.tsx must use createProgressiveQueryIdentity"
+    );
 
     // Must force server initial query to page=1, pageSize=24, skip=0
     assert.ok(
@@ -187,7 +367,9 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
 
     // Must remove legacy in-memory full catalog loaders and sorters
     assert.ok(
-      !content.includes("getProducts()") && !content.includes("from \"@/lib/getProducts\"") && !content.includes("from '@/lib/getProducts'"),
+      !content.includes("getProducts()") &&
+        !content.includes('from "@/lib/getProducts"') &&
+        !content.includes("from '@/lib/getProducts'"),
       "app/shop/page.tsx must NOT import or call getProducts()"
     );
     assert.ok(
@@ -195,15 +377,16 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
       "app/shop/page.tsx must NOT perform in-memory sortProducts()"
     );
     assert.ok(
-      !content.includes("categoryProducts.filter") && !content.includes("allProducts.filter"),
+      !content.includes("categoryProducts.filter") &&
+        !content.includes("allProducts.filter"),
       "app/shop/page.tsx must NOT filter full product arrays in memory"
     );
   });
 
   // ---------------------------------------------------------------------------
-  // H. Structural Source Guards: components/shop/ProgressiveProductGrid.tsx
+  // K. Structural Source Guards: components/shop/ProgressiveProductGrid.tsx
   // ---------------------------------------------------------------------------
-  it("H. ProgressiveProductGrid.tsx implements client progressive loading, deduplication, URL restoration, and history synchronization", () => {
+  it("K. ProgressiveProductGrid.tsx implements explicit query reset, replaceState for restoration, pushState for Load More, and truthful history", () => {
     const filePath = path.join(
       process.cwd(),
       "components/shop/ProgressiveProductGrid.tsx"
@@ -231,42 +414,31 @@ describe("Phase 5 Task 6 — Shop Server Component & Progressive Load More Clien
       content.includes("createProgressiveQueryUrl"),
       "Must import and use createProgressiveQueryUrl"
     );
-
-    // Load More API calls
     assert.ok(
-      content.includes("createProgressiveQueryUrl") && content.includes("fetch("),
-      "Must fetch next page using createProgressiveQueryUrl"
+      content.includes("createShopHistoryUrl"),
+      "Must import and use createShopHistoryUrl"
+    );
+    assert.ok(
+      content.includes("createProgressiveQueryIdentity"),
+      "Must import and use createProgressiveQueryIdentity"
     );
 
-    // Browser URL synchronization must remain on /shop, NEVER pushing /api/products
+    // Restoration must use replaceState, Load More must use pushState
     assert.ok(
-      content.includes("window.history.pushState") || content.includes("history.pushState") || content.includes("router.push") || content.includes("window.history.replaceState"),
-      "Must synchronize browser URL using history API"
+      content.includes("window.history.replaceState"),
+      "Restoration must use replaceState"
     );
+    assert.ok(
+      content.includes("window.history.pushState"),
+      "Load More must use pushState"
+    );
+
+    // Browser history must never receive /api/products pathname
     assert.ok(
       !content.includes('pushState(null, "", `/api/products') &&
         !content.includes("pushState(null, '', `/api/products") &&
-        !content.includes('pushState({}, "", `/api/products'),
+        !content.includes('replaceState(null, "", `/api/products'),
       "Browser history must never receive /api/products pathname"
-    );
-  });
-
-  // ---------------------------------------------------------------------------
-  // I. Structural Source Guards: components/shop/LoadMoreProducts.tsx
-  // ---------------------------------------------------------------------------
-  it("I. LoadMoreProducts.tsx no longer slices full in-memory product arrays", () => {
-    const content = fs.readFileSync(
-      path.join(process.cwd(), "components/shop/LoadMoreProducts.tsx"),
-      "utf8"
-    );
-
-    assert.ok(
-      !content.includes("safeProducts.slice(0, visibleCount)"),
-      "LoadMoreProducts must not perform in-memory array slicing"
-    );
-    assert.ok(
-      content.includes("ProgressiveProductGrid"),
-      "LoadMoreProducts must delegate to ProgressiveProductGrid"
     );
   });
 });

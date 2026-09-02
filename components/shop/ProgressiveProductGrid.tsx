@@ -10,6 +10,10 @@ import {
   nextRequestGeneration,
   isCurrentGeneration,
 } from "@/lib/catalog/progressiveCatalogState";
+import {
+  createProgressiveQueryIdentity,
+  createShopHistoryUrl,
+} from "./progressiveProductGridState";
 
 export type ProgressiveProductGridProps = {
   initialProducts: PublicProductCardDTO[];
@@ -34,6 +38,14 @@ export default function ProgressiveProductGrid({
   requestedPage = 1,
   gridClassName = "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 lg:gap-6",
 }: ProgressiveProductGridProps) {
+  const currentIdentity = createProgressiveQueryIdentity({
+    category,
+    subcategory,
+    q,
+    sort,
+  });
+
+  const [prevIdentity, setPrevIdentity] = useState<string>(currentIdentity);
   const [products, setProducts] = useState<PublicProductCardDTO[]>(initialProducts);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
@@ -44,19 +56,22 @@ export default function ProgressiveProductGrid({
   const requestGenRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Restoration lifecycle for requestedPage > 1 on mount
+  // Explicit state reset when authoritative query identity changes
+  if (prevIdentity !== currentIdentity) {
+    setPrevIdentity(currentIdentity);
+    setProducts(initialProducts);
+    setCurrentPage(1);
+    setHasMore(initialHasMore);
+    setTotalItems(initialTotalItems);
+    setLoading(false);
+    setError(null);
+  }
+
+  // Truthful restoration lifecycle for requestedPage > 1 on mount or identity transition
   useEffect(() => {
     if (!requestedPage || requestedPage <= 1) return;
 
     const restoration = computeRestorationTarget(requestedPage, 10);
-
-    // If page requested exceeds max restoration (10), normalize browser URL to page=10
-    if (restoration.shouldNormalizeUrl && typeof window !== "undefined") {
-      const currentUrl = new URL(window.location.href);
-      currentUrl.searchParams.set("page", String(restoration.targetPage));
-      window.history.replaceState(null, "", currentUrl.pathname + currentUrl.search);
-    }
-
     if (restoration.targetPage <= 1) return;
 
     let isAborted = false;
@@ -104,10 +119,23 @@ export default function ProgressiveProductGrid({
             break;
           }
 
+          const resolvedPage = data.page ?? p;
           setProducts((prev) => deduplicateProducts(prev, data.items));
-          setCurrentPage(data.page ?? p);
+          setCurrentPage(resolvedPage);
           setHasMore(Boolean(data.hasMore));
           setTotalItems(data.totalItems ?? initialTotalItems);
+
+          // Truthful restoration history update using replaceState
+          if (typeof window !== "undefined") {
+            const nextHistoryUrl = createShopHistoryUrl({
+              category,
+              subcategory,
+              q,
+              sort,
+              page: resolvedPage,
+            });
+            window.history.replaceState(null, "", nextHistoryUrl);
+          }
 
           if (!data.hasMore) {
             break;
@@ -130,7 +158,7 @@ export default function ProgressiveProductGrid({
       isAborted = true;
       controller.abort();
     };
-  }, [requestedPage, category, subcategory, q, sort, initialTotalItems]);
+  }, [currentIdentity, requestedPage, category, subcategory, q, sort, initialTotalItems]);
 
   async function handleLoadMore() {
     if (loading || !hasMore) return;
@@ -174,18 +202,24 @@ export default function ProgressiveProductGrid({
         return;
       }
 
+      const resolvedPage = data.page ?? nextPage;
       setProducts((prev) => deduplicateProducts(prev, data.items));
-      setCurrentPage(data.page ?? nextPage);
+      setCurrentPage(resolvedPage);
       setHasMore(Boolean(data.hasMore));
       if (typeof data.totalItems === "number") {
         setTotalItems(data.totalItems);
       }
 
-      // Synchronize browser history path to /shop?...page=N without API pathname
+      // Synchronize customer-visible browser history path using pushState
       if (typeof window !== "undefined") {
-        const currentUrl = new URL(window.location.href);
-        currentUrl.searchParams.set("page", String(data.page ?? nextPage));
-        window.history.pushState(null, "", currentUrl.pathname + currentUrl.search);
+        const nextHistoryUrl = createShopHistoryUrl({
+          category,
+          subcategory,
+          q,
+          sort,
+          page: resolvedPage,
+        });
+        window.history.pushState(null, "", nextHistoryUrl);
       }
     } catch (err: unknown) {
       if ((err as Error)?.name !== "AbortError") {

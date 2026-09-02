@@ -8,6 +8,7 @@ import { getCachedCategoryRows } from "@/lib/catalogRead";
 import { parsePublicCatalogParams } from "@/lib/catalog/queryParams";
 import { getPublicCatalogQuery } from "@/lib/catalog/publicCatalogQuery";
 import type { ParsedPublicCatalogParams } from "@/lib/catalog/types";
+import { createProgressiveQueryIdentity } from "@/components/shop/progressiveProductGridState";
 
 export const revalidate = 60;
 
@@ -101,7 +102,12 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
         ? activeCategory.name
         : "All Products";
 
-  const queryKey = `${category || "all"}-${subcategory || "all"}-${query || ""}-${sort}`;
+  const queryKey = createProgressiveQueryIdentity({
+    category,
+    subcategory,
+    q: query,
+    sort,
+  });
 
   return (
     <main>
