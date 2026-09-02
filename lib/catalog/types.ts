@@ -8,7 +8,10 @@ export type PublicProductCardDTO = {
   price: number;
   compareAtPrice: number | null;
   image: string;
+  images: string[];
   category: string;
+  categoryName: string | null;
+  subcategoryName: string | null;
   stock: number;
   isHotDeal: boolean;
   isUpcoming: boolean;

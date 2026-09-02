@@ -8,6 +8,7 @@ import type {
   PublicProductDetailDTO,
   PublicProductVariantDTO,
 } from "./types";
+import { resolveSubcategoryBatch } from "./subcategoryResolution";
 
 export async function getPublicCatalogQuery(
   params: ParsedPublicCatalogParams
@@ -124,6 +125,13 @@ export async function getPublicCatalogQuery(
         compareAtPrice: true,
         image: true,
         category: true,
+        categoryId: true,
+        subcategory: true,
+        categoryRel: {
+          select: {
+            name: true,
+          },
+        },
         stock: true,
         isHotDeal: true,
         isUpcoming: true,
@@ -141,22 +149,73 @@ export async function getPublicCatalogQuery(
     prisma.product.count({ where }),
   ]);
 
-  // 7. Project to PublicProductCardDTO (Decimal -> Number presentation serialization)
-  const items: PublicProductCardDTO[] = products.map((p) => ({
-    id: p.id,
-    name: p.name,
-    price: Number(p.price),
-    compareAtPrice:
-      p.compareAtPrice == null ? null : Number(p.compareAtPrice),
-    image: p.image,
-    category: p.category,
-    stock: p.stock,
-    isHotDeal: p.isHotDeal,
-    isUpcoming: p.isUpcoming,
-    badgeText: p.badgeText,
-    badgeTone: p.badgeTone,
-    hasVariants: (p._count?.variants ?? 0) > 0,
-  }));
+  // 7. Concurrent batched media and subcategory resolution
+  const productIds = products.map((p) => p.id);
+
+  const [productImages, subcategoryMap] = await Promise.all([
+    productIds.length > 0
+      ? prisma.productImage.findMany({
+          where: { productId: { in: productIds } },
+          orderBy: [
+            { productId: "asc" },
+            { sortOrder: "asc" },
+            { id: "asc" },
+          ],
+          select: {
+            productId: true,
+            url: true,
+          },
+        })
+      : Promise.resolve([]),
+    resolveSubcategoryBatch(products),
+  ]);
+
+  const groupedImages = new Map<number, string[]>();
+  for (const img of productImages) {
+    let list = groupedImages.get(img.productId);
+    if (!list) {
+      list = [];
+      groupedImages.set(img.productId, list);
+    }
+    list.push(img.url);
+  }
+
+  // 8. Project to PublicProductCardDTO (Decimal -> Number presentation serialization)
+  const items: PublicProductCardDTO[] = products.map((p) => {
+    const relationalImages = groupedImages.get(p.id);
+    const images =
+      relationalImages && relationalImages.length > 0
+        ? relationalImages.slice(0, 4)
+        : [p.image];
+
+    let subcategoryName: string | null = null;
+    if (p.categoryId !== null && p.subcategory) {
+      const catMap = subcategoryMap.get(p.categoryId);
+      if (catMap) {
+        subcategoryName =
+          catMap.get(p.subcategory.trim().toLowerCase()) ?? null;
+      }
+    }
+
+    return {
+      id: p.id,
+      name: p.name,
+      price: Number(p.price),
+      compareAtPrice:
+        p.compareAtPrice == null ? null : Number(p.compareAtPrice),
+      image: p.image,
+      images,
+      category: p.category,
+      categoryName: p.categoryRel?.name ?? p.category ?? null,
+      subcategoryName,
+      stock: p.stock,
+      isHotDeal: p.isHotDeal,
+      isUpcoming: p.isUpcoming,
+      badgeText: p.badgeText,
+      badgeTone: p.badgeTone,
+      hasVariants: (p._count?.variants ?? 0) > 0,
+    };
+  });
 
   // 8. Pagination envelope calculation
   const totalPages = Math.ceil(totalItems / params.pageSize);
@@ -193,6 +252,17 @@ export async function getPublicProductDetailQuery(
       category: true,
       categoryId: true,
       subcategory: true,
+      categoryRel: {
+        select: {
+          name: true,
+        },
+      },
+      images: {
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+        select: {
+          url: true,
+        },
+      },
       description: true,
       stock: true,
       isHotDeal: true,
@@ -217,6 +287,23 @@ export async function getPublicProductDetailQuery(
     return null;
   }
 
+  const subcategoryMap = await resolveSubcategoryBatch([product]);
+  let subcategoryName: string | null = null;
+  if (product.categoryId !== null && product.subcategory) {
+    const catMap = subcategoryMap.get(product.categoryId);
+    if (catMap) {
+      subcategoryName =
+        catMap.get(product.subcategory.trim().toLowerCase()) ?? null;
+    }
+  }
+
+  const images =
+    product.images.length > 0
+      ? product.images.map((i) => i.url).slice(0, 4)
+      : [product.image];
+
+  const categoryName = product.categoryRel?.name ?? product.category ?? null;
+
   const variants: PublicProductVariantDTO[] = product.variants.map((v) => ({
     id: v.id,
     label: v.label,
@@ -232,7 +319,10 @@ export async function getPublicProductDetailQuery(
     compareAtPrice:
       product.compareAtPrice == null ? null : Number(product.compareAtPrice),
     image: product.image,
+    images,
     category: product.category,
+    categoryName,
+    subcategoryName,
     categoryId: product.categoryId,
     subcategory: product.subcategory,
     description: product.description,
