@@ -15,6 +15,7 @@ import {
 import {
   getAdminCatalogQuery,
   getAdminProductDetailQuery,
+  getAdminLowStockCount,
 } from "@/lib/catalog/adminCatalogQuery";
 
 export const runtime = "nodejs";
@@ -75,6 +76,19 @@ export async function GET(req: Request) {
     if (view === "admin" || view === "full") {
       const unauthorized = requireAdmin(req);
       if (unauthorized) return unauthorized;
+
+      if (searchParams.has("metric")) {
+        const metric = text(searchParams.get("metric")).toLowerCase();
+        if (metric === "low-stock") {
+          const totalItems = await getAdminLowStockCount();
+          return NextResponse.json({ success: true, metric: "low-stock", totalItems });
+        }
+
+        return NextResponse.json(
+          { success: false, message: "Invalid admin metric." },
+          { status: 400 }
+        );
+      }
 
       if (hasId) {
         const id = parsePositiveInt(searchParams.get("id"));

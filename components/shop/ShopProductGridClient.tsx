@@ -38,7 +38,7 @@ export default function ShopProductGridClient({
     const res = await fetch(`/api/products?${params.toString()}`);
     const data = await res.json();
 
-    const newItems = data.items || data.products || [];
+    const newItems = Array.isArray(data.items) ? data.items : [];
     setProducts((prev) => [...prev, ...newItems]);
     setHasMore(Boolean(data.hasMore));
     setPage(nextPage);

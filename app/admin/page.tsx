@@ -36,24 +36,38 @@ function normalizeArray<T>(data: unknown, key: string): T[] {
 export default function AdminDashboardPage() {
   const [totalProducts, setTotalProducts] = useState(0);
   const [hotDealsTotal, setHotDealsTotal] = useState(0);
+  const [lowStockTotal, setLowStockTotal] = useState(0);
   const [orders, setOrders] = useState<Order[]>([]);
   const [messages, setMessages] = useState<CustomerMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let alive = true;
+
     async function loadDashboard() {
       try {
-        const [allProductsRes, hotDealsRes, orderRes, messageRes] = await Promise.all([
-          fetch("/api/products?view=admin&page=1&pageSize=1&filter=all", { cache: "no-store" }),
-          fetch("/api/products?view=admin&page=1&pageSize=1&filter=hot", { cache: "no-store" }),
-          fetch("/api/orders", { cache: "no-store" }),
-          fetch("/api/customer-messages", { cache: "no-store" }),
-        ]);
+        const [allProductsRes, hotDealsRes, lowStockRes, orderRes, messageRes] =
+          await Promise.all([
+            fetch("/api/products?view=admin&page=1&pageSize=1&filter=all", {
+              cache: "no-store",
+            }),
+            fetch("/api/products?view=admin&page=1&pageSize=1&filter=hot", {
+              cache: "no-store",
+            }),
+            fetch("/api/products?view=admin&metric=low-stock", {
+              cache: "no-store",
+            }),
+            fetch("/api/orders", { cache: "no-store" }),
+            fetch("/api/customer-messages", { cache: "no-store" }),
+          ]);
 
         const allProductsData = await allProductsRes.json().catch(() => null);
         const hotDealsData = await hotDealsRes.json().catch(() => null);
+        const lowStockData = await lowStockRes.json().catch(() => null);
         const orderData = await orderRes.json().catch(() => null);
         const messageData = await messageRes.json().catch(() => null);
+
+        if (!alive) return;
 
         setTotalProducts(
           typeof allProductsData?.totalItems === "number"
@@ -65,14 +79,25 @@ export default function AdminDashboardPage() {
             ? hotDealsData.totalItems
             : 0
         );
+        setLowStockTotal(
+          typeof lowStockData?.totalItems === "number"
+            ? lowStockData.totalItems
+            : 0
+        );
         setOrders(normalizeArray(orderData, "orders"));
         setMessages(normalizeArray(messageData, "messages"));
       } finally {
-        setLoading(false);
+        if (alive) {
+          setLoading(false);
+        }
       }
     }
 
     loadDashboard();
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const stats = useMemo(() => {
@@ -97,11 +122,11 @@ export default function AdminDashboardPage() {
         String(order.status || order.orderStatus || "").toLowerCase().includes("pending")
       ).length,
       newMessages: messages.filter((message) => message.status === "new").length,
-      lowStock: 0,
+      lowStock: lowStockTotal,
       hotDeals: hotDealsTotal,
       totalSales,
     };
-  }, [totalProducts, hotDealsTotal, orders, messages]);
+  }, [totalProducts, hotDealsTotal, lowStockTotal, orders, messages]);
 
   return (
     <main className="min-h-screen bg-[#fcf8f6] px-4 py-10">

@@ -138,7 +138,7 @@ export default function HomePromoGrid({
         const productData = await productRes.json();
         const wideData = await wideRes.json();
 
-        const productList = productData?.items || productData?.products;
+        const productList = productData?.items;
         if (productRes.ok && productData?.success && Array.isArray(productList)) {
           setProducts(productList);
         }

@@ -10,7 +10,7 @@ import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../lib/adminSessi
 const safety = validateTestDatabaseSafety();
 
 describe(
-  "Phase 5 Task 4 — Products API Atomic Cutover & Full Consumer Migration",
+  "Phase 5 Task 4 / 4A — Products API Atomic Cutover & Full Consumer Migration",
   {
     skip:
       !safety.safe &&
@@ -33,6 +33,20 @@ describe(
     let pInactiveId: number;
     let pDeletedId: number;
     let pAdminTargetId: number;
+
+    // Task 4A specific fixture IDs
+    let pLowStock0Id: number;
+    let pLowStock3Id: number;
+    let pStock4Id: number;
+    let pInactiveStock0Id: number;
+    let pDeletedStock0Id: number;
+
+    let pHotFilterId: number;
+    let pUpcomingFilterId: number;
+    let pDiscountFilterId: number;
+    let pEqualPriceFilterId: number;
+    let pBadgeFilterId: number;
+
     let authCookieHeader: string;
 
     before(async () => {
@@ -178,6 +192,154 @@ describe(
         },
       });
       createdVariantIds.push(vAdminInactive.id);
+
+      // 7. Task 4A Low-Stock Fixtures
+      const pLow0 = await prisma.product.create({
+        data: {
+          name: `LowStock 0 ${runKey}`,
+          price: 100.0,
+          image: "/images/low0.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          stock: 0,
+        },
+      });
+      pLowStock0Id = pLow0.id;
+      createdProductIds.push(pLow0.id);
+
+      const pLow3 = await prisma.product.create({
+        data: {
+          name: `LowStock 3 ${runKey}`,
+          price: 100.0,
+          image: "/images/low3.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          stock: 3,
+        },
+      });
+      pLowStock3Id = pLow3.id;
+      createdProductIds.push(pLow3.id);
+
+      const pStk4 = await prisma.product.create({
+        data: {
+          name: `Stock 4 ${runKey}`,
+          price: 100.0,
+          image: "/images/stk4.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          stock: 4,
+        },
+      });
+      pStock4Id = pStk4.id;
+      createdProductIds.push(pStk4.id);
+
+      const pInactStk0 = await prisma.product.create({
+        data: {
+          name: `Inactive Stock 0 ${runKey}`,
+          price: 100.0,
+          image: "/images/inact0.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: false,
+          stock: 0,
+        },
+      });
+      pInactiveStock0Id = pInactStk0.id;
+      createdProductIds.push(pInactStk0.id);
+
+      const pDelStk0 = await prisma.product.create({
+        data: {
+          name: `Deleted Stock 0 ${runKey}`,
+          price: 100.0,
+          image: "/images/del0.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          deletedAt: new Date(),
+          stock: 0,
+        },
+      });
+      pDeletedStock0Id = pDelStk0.id;
+      createdProductIds.push(pDelStk0.id);
+
+      // 8. Task 4A Admin Filter Fixtures
+      const pHot = await prisma.product.create({
+        data: {
+          name: `Hot Filter Prod ${runKey}`,
+          price: 100.0,
+          image: "/images/hot.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isHotDeal: true,
+          isActive: true,
+          stock: 10,
+        },
+      });
+      pHotFilterId = pHot.id;
+      createdProductIds.push(pHot.id);
+
+      const pUpc = await prisma.product.create({
+        data: {
+          name: `Upcoming Filter Prod ${runKey}`,
+          price: 100.0,
+          image: "/images/upc.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isUpcoming: true,
+          isActive: true,
+          stock: 10,
+        },
+      });
+      pUpcomingFilterId = pUpc.id;
+      createdProductIds.push(pUpc.id);
+
+      const pDisc = await prisma.product.create({
+        data: {
+          name: `Discount Filter Prod ${runKey}`,
+          price: 100.0,
+          compareAtPrice: 150.0, // > price
+          image: "/images/disc.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          stock: 10,
+        },
+      });
+      pDiscountFilterId = pDisc.id;
+      createdProductIds.push(pDisc.id);
+
+      const pEqPrice = await prisma.product.create({
+        data: {
+          name: `Equal Price Prod ${runKey}`,
+          price: 100.0,
+          compareAtPrice: 100.0, // == price (excluded)
+          image: "/images/eq.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          stock: 10,
+        },
+      });
+      pEqualPriceFilterId = pEqPrice.id;
+      createdProductIds.push(pEqPrice.id);
+
+      const pBdg = await prisma.product.create({
+        data: {
+          name: `Badge Filter Prod ${runKey}`,
+          price: 100.0,
+          badgeText: `Badge ${runKey}`,
+          image: "/images/bdg.png",
+          category: `API Cat ${runKey}`,
+          categoryId: cat.id,
+          isActive: true,
+          stock: 10,
+        },
+      });
+      pBadgeFilterId = pBdg.id;
+      createdProductIds.push(pBdg.id);
     });
 
     after(async () => {
@@ -417,9 +579,171 @@ describe(
     });
 
     // -------------------------------------------------------------------------
-    // C. Consumer Migration Structural Guards
+    // C. Task 4A Targeted Low-Stock Metric & Validation
     // -------------------------------------------------------------------------
-    it("app/admin/products/page.tsx requests view=admin with server pagination and on-demand detail edit", () => {
+    it("Authenticated GET /api/products?view=admin&metric=low-stock returns 200 with accurate totalItems and no public cache headers", async () => {
+      const res = await GET(
+        new Request("http://localhost/api/products?view=admin&metric=low-stock", {
+          headers: { cookie: authCookieHeader },
+        })
+      );
+      assert.strictEqual(res.status, 200);
+      assert.ok(!res.headers.get("cache-control")?.includes("public"), "Metric response must NOT have public cache headers");
+
+      const data = await res.json();
+      assert.strictEqual(data.success, true);
+      assert.strictEqual(data.metric, "low-stock");
+      assert.strictEqual(typeof data.totalItems, "number");
+      assert.ok(data.totalItems >= 2, "Expected at least pLowStock0 and pLowStock3 to be counted");
+      assert.ok(
+        pLowStock0Id > 0 &&
+          pLowStock3Id > 0 &&
+          pStock4Id > 0 &&
+          pInactiveStock0Id > 0 &&
+          pDeletedStock0Id > 0
+      );
+    });
+
+    it("Unauthenticated GET /api/products?view=admin&metric=low-stock returns 401", async () => {
+      const res = await GET(
+        new Request("http://localhost/api/products?view=admin&metric=low-stock")
+      );
+      assert.strictEqual(res.status, 401);
+      const data = await res.json();
+      assert.strictEqual(data.success, false);
+    });
+
+    it("Authenticated GET /api/products?view=admin&metric=unknown-metric returns 400", async () => {
+      const res = await GET(
+        new Request("http://localhost/api/products?view=admin&metric=unknown-metric", {
+          headers: { cookie: authCookieHeader },
+        })
+      );
+      assert.strictEqual(res.status, 400);
+      const data = await res.json();
+      assert.strictEqual(data.success, false);
+      assert.strictEqual(data.message, "Invalid admin metric.");
+    });
+
+    it("Authenticated GET /api/products?view=admin&metric=low-stock&id=123 prioritizes metric mode", async () => {
+      const res = await GET(
+        new Request(`http://localhost/api/products?view=admin&metric=low-stock&id=${pPublicActiveId}`, {
+          headers: { cookie: authCookieHeader },
+        })
+      );
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.success, true);
+      assert.strictEqual(data.metric, "low-stock");
+      assert.strictEqual(typeof data.totalItems, "number");
+      assert.strictEqual(data.product, undefined, "Must not return product detail when metric is requested");
+    });
+
+    // -------------------------------------------------------------------------
+    // D. Task 4A View=Full Privileged Alias Security & Detail Semantics
+    // -------------------------------------------------------------------------
+    it("Unauthenticated GET /api/products?view=full&page=1 returns 401", async () => {
+      const res = await GET(
+        new Request("http://localhost/api/products?view=full&page=1")
+      );
+      assert.strictEqual(res.status, 401);
+      const data = await res.json();
+      assert.strictEqual(data.success, false);
+    });
+
+    it("Unauthenticated GET /api/products?view=full&id=<validPublicId> returns 401 (auth-first precedence)", async () => {
+      const res = await GET(
+        new Request(`http://localhost/api/products?view=full&id=${pPublicActiveId}`)
+      );
+      assert.strictEqual(res.status, 401);
+      const data = await res.json();
+      assert.strictEqual(data.success, false);
+    });
+
+    it("Authenticated GET /api/products?view=full&id=<adminTargetId> returns AdminProductDetailDTO semantics", async () => {
+      const res = await GET(
+        new Request(`http://localhost/api/products?view=full&id=${pAdminTargetId}`, {
+          headers: { cookie: authCookieHeader },
+        })
+      );
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.strictEqual(data.success, true);
+      assert.ok(data.product);
+      assert.strictEqual(data.product.id, pAdminTargetId);
+      assert.strictEqual(data.product.variants.length, 2);
+    });
+
+    // -------------------------------------------------------------------------
+    // E. Task 4A API-Level Admin Filter Route Wires Correctly
+    // -------------------------------------------------------------------------
+    it("Authenticated GET /api/products?view=admin&filter=hot includes hot fixture", async () => {
+      const res = await GET(
+        new Request(
+          `http://localhost/api/products?view=admin&filter=hot&q=${encodeURIComponent(runKey)}`,
+          {
+            headers: { cookie: authCookieHeader },
+          }
+        )
+      );
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      const ids = data.items.map((i: { id: number }) => i.id);
+      assert.ok(ids.includes(pHotFilterId), "Must include hot deal product");
+      assert.ok(!ids.includes(pUpcomingFilterId), "Must not include upcoming product");
+    });
+
+    it("Authenticated GET /api/products?view=admin&filter=upcoming includes upcoming fixture", async () => {
+      const res = await GET(
+        new Request(
+          `http://localhost/api/products?view=admin&filter=upcoming&q=${encodeURIComponent(runKey)}`,
+          {
+            headers: { cookie: authCookieHeader },
+          }
+        )
+      );
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      const ids = data.items.map((i: { id: number }) => i.id);
+      assert.ok(ids.includes(pUpcomingFilterId), "Must include upcoming product");
+      assert.ok(!ids.includes(pHotFilterId), "Must not include hot deal product");
+    });
+
+    it("Authenticated GET /api/products?view=admin&filter=discount matches compareAtPrice > price and excludes compareAtPrice == price", async () => {
+      const res = await GET(
+        new Request(
+          `http://localhost/api/products?view=admin&filter=discount&q=${encodeURIComponent(runKey)}`,
+          {
+            headers: { cookie: authCookieHeader },
+          }
+        )
+      );
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      const ids = data.items.map((i: { id: number }) => i.id);
+      assert.ok(ids.includes(pDiscountFilterId), "Must include compareAtPrice > price product");
+      assert.ok(!ids.includes(pEqualPriceFilterId), "Must EXCLUDE compareAtPrice == price product");
+    });
+
+    it("Authenticated GET /api/products?view=admin&filter=badge includes badge fixture", async () => {
+      const res = await GET(
+        new Request(
+          `http://localhost/api/products?view=admin&filter=badge&q=${encodeURIComponent(runKey)}`,
+          {
+            headers: { cookie: authCookieHeader },
+          }
+        )
+      );
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      const ids = data.items.map((i: { id: number }) => i.id);
+      assert.ok(ids.includes(pBadgeFilterId), "Must include custom badge product");
+    });
+
+    // -------------------------------------------------------------------------
+    // F. Task 4A Consumer Migration Structural Guards
+    // -------------------------------------------------------------------------
+    it("app/admin/products/page.tsx requests view=admin with server pagination, on-demand detail edit, and fail-closed error handling", () => {
       const content = fs.readFileSync(
         path.join(process.cwd(), "app/admin/products/page.tsx"),
         "utf8"
@@ -436,6 +760,16 @@ describe(
         !content.includes("setProducts(data.products)") && content.includes("data.items"),
         "Admin products page must consume data.items, not legacy data.products"
       );
+      // Fail-closed inline edit: NO fallback to list DTO `product`
+      assert.ok(
+        !content.includes(": product;") && !content.includes("? data.product : product"),
+        "startEdit must NOT fall back to incomplete list DTO on detail fetch error"
+      );
+      // Relational category authority
+      assert.ok(
+        content.includes("c.id === detail.categoryId") || content.includes("c.id === (detail.categoryId"),
+        "startEdit must use relational categoryId as primary authority"
+      );
     });
 
     it("app/admin/products/[id]/edit/page.tsx requests view=admin&id=", () => {
@@ -449,10 +783,18 @@ describe(
       );
     });
 
-    it("app/admin/page.tsx consumes totalItems from bounded requests and does not derive total from items.length", () => {
+    it("app/admin/page.tsx consumes totalItems from bounded requests, fetches metric=low-stock, and does not hardcode lowStock: 0", () => {
       const content = fs.readFileSync(
         path.join(process.cwd(), "app/admin/page.tsx"),
         "utf8"
+      );
+      assert.ok(
+        content.includes("metric=low-stock"),
+        "Admin dashboard must request metric=low-stock"
+      );
+      assert.ok(
+        !content.includes("lowStock: 0"),
+        "Admin dashboard must NOT have hardcoded lowStock: 0"
       );
       assert.ok(
         content.includes("totalItems"),
@@ -460,7 +802,7 @@ describe(
       );
     });
 
-    it("components/home/CategorySection.tsx extracts products from data.items", () => {
+    it("components/home/CategorySection.tsx extracts products from data.items without legacy .products fallback", () => {
       const content = fs.readFileSync(
         path.join(process.cwd(), "components/home/CategorySection.tsx"),
         "utf8"
@@ -469,9 +811,14 @@ describe(
         content.includes("data?.items") || content.includes("data.items"),
         "CategorySection fallback must extract products from data.items"
       );
+      assert.ok(
+        !content.includes("data?.items || productPayload?.data?.products") &&
+          !content.includes("data.items || data.products"),
+        "CategorySection must NOT have legacy .products fallback"
+      );
     });
 
-    it("components/home/HomePromoGrid.tsx extracts products from data.items", () => {
+    it("components/home/HomePromoGrid.tsx extracts products from data.items without legacy .products fallback", () => {
       const content = fs.readFileSync(
         path.join(process.cwd(), "components/home/HomePromoGrid.tsx"),
         "utf8"
@@ -482,9 +829,14 @@ describe(
           content.includes("data.items"),
         "HomePromoGrid fallback must extract products from data.items"
       );
+      assert.ok(
+        !content.includes("productData?.items || productData?.products") &&
+          !content.includes("data.items || data.products"),
+        "HomePromoGrid must NOT have legacy .products fallback"
+      );
     });
 
-    it("components/shop/ShopProductGridClient.tsx consumes items and hasMore", () => {
+    it("components/shop/ShopProductGridClient.tsx consumes items and hasMore without legacy .products fallback", () => {
       const content = fs.readFileSync(
         path.join(process.cwd(), "components/shop/ShopProductGridClient.tsx"),
         "utf8"
@@ -496,6 +848,10 @@ describe(
       assert.ok(
         content.includes("data.hasMore"),
         "ShopProductGridClient must consume data.hasMore"
+      );
+      assert.ok(
+        !content.includes("data.items || data.products"),
+        "ShopProductGridClient must NOT have legacy .products fallback"
       );
     });
   }

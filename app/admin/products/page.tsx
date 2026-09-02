@@ -158,14 +158,23 @@ export default function AdminProductsPage() {
         cache: "no-store",
       });
       const data = await res.json();
-      const detail = res.ok && data?.success && data.product ? data.product : product;
+
+      if (!res.ok || !data?.success || !data?.product) {
+        setMessage(data?.message || "Failed to load product details for editing.");
+        return;
+      }
+
+      const detail = data.product;
 
       const matchedCategory =
+        (typeof detail.categoryId === "number" &&
+          categories.find((c) => c.id === detail.categoryId)) ||
         categories.find(
           (c) =>
             c.name.toLowerCase() === (detail.category || "").toLowerCase() ||
             c.slug === slugify(detail.category)
-        ) || null;
+        ) ||
+        null;
 
       const matchedSubcategory =
         matchedCategory?.subcategories.find(

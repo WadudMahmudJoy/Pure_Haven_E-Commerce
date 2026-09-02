@@ -305,7 +305,7 @@ export default function CategorySection({
         }
       }
 
-      const productList = productPayload?.data?.items || productPayload?.data?.products;
+      const productList = productPayload?.data?.items;
       if (
         productPayload?.ok &&
         productPayload.data?.success &&

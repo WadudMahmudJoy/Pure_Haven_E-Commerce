@@ -172,3 +172,13 @@ export async function getAdminProductDetailQuery(
     })),
   };
 }
+
+export async function getAdminLowStockCount(): Promise<number> {
+  return prisma.product.count({
+    where: {
+      isActive: true,
+      deletedAt: null,
+      stock: { lte: 3 },
+    },
+  });
+}
