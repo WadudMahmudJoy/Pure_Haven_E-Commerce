@@ -13,9 +13,9 @@ import { fallbackImageForCategory, normalizeImageSrc } from "@/lib/imagePaths";
 type Subcategory = PublicSubcategory;
 type Category = PublicCategory;
 
-type Product = {
+/** Minimal product shape used only for subcategory fallback thumbnail resolution in self-fetch path. */
+type SubcategoryThumbnailProduct = {
   id: number;
-  name: string;
   image: string;
   category: string;
   subcategory?: string | null;
@@ -29,41 +29,45 @@ type BannerItem = {
   image: string;
 };
 
-const fallbackImages: Record<string, string> = {
-  cosmetics:
-    "https://images.unsplash.com/photo-1596462502278-27bfdc403348?q=80&w=1200&auto=format&fit=crop",
-  haircare:
-    "https://images.unsplash.com/photo-1522338140262-f46f5913618a?q=80&w=1200&auto=format&fit=crop",
-  skincare:
-    "https://images.unsplash.com/photo-1556228578-8c89e6adf883?q=80&w=1200&auto=format&fit=crop",
-  perfume:
-    "https://images.unsplash.com/photo-1541643600914-78b084683601?q=80&w=1200&auto=format&fit=crop",
-  food:
-    "https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1200&auto=format&fit=crop",
-  "mens-products":
-    "https://images.unsplash.com/photo-1512436991641-6745cdb1723f?q=80&w=1200&auto=format&fit=crop",
-  "baby-products":
-    "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?q=80&w=1200&auto=format&fit=crop",
-};
-
 const defaultFallback = "/images/categories/cosmetics.jpg";
 
 function slug(value?: string | null) {
   return (value || "").trim().toLowerCase().replace(/\s+/g, "-");
 }
 
-function categoryImage(category: Category, products: Product[]) {
-  return normalizeImageSrc(category.image || fallbackImageForCategory(category.slug), {
-    category: category.slug,
-    fallbackSrc: defaultFallback,
-  });
+function categoryImage(category: Category) {
+  return normalizeImageSrc(
+    category.image || fallbackImageForCategory(category.slug),
+    {
+      category: category.slug,
+      fallbackSrc: defaultFallback,
+    }
+  );
 }
 
-function subcategoryImage(
+/**
+ * Resolve subcategory image:
+ *   1. Prefer subcategoryImageMap[`${catSlug}:${subSlug}`] (server-supplied, batched)
+ *   2. Fallback to in-memory product scan (self-fetch path only)
+ *   3. Category.image
+ *   4. Static fallback
+ */
+function resolveSubcategoryImage(
   category: Category,
   subcategory: Subcategory,
-  products: Product[]
-) {
+  subcategoryImageMap: Record<string, string>,
+  products: SubcategoryThumbnailProduct[]
+): string {
+  // 1. Server-supplied batched map (homepage path — no product iteration)
+  const mapKey = `${category.slug.toLowerCase()}:${subcategory.slug.toLowerCase()}`;
+  if (subcategoryImageMap[mapKey]) {
+    return normalizeImageSrc(subcategoryImageMap[mapKey], {
+      category: category.slug,
+      fallbackSrc: defaultFallback,
+    });
+  }
+
+  // 2. In-memory product scan (self-fetch fallback path for non-homepage callers)
   const product = products.find(
     (p) =>
       slug(p.category) === category.slug &&
@@ -129,7 +133,7 @@ function normalizeCategories(value: unknown): Category[] {
     .filter(Boolean) as Category[];
 }
 
-function normalizeProducts(value: unknown): Product[] {
+function normalizeProducts(value: unknown): SubcategoryThumbnailProduct[] {
   if (!Array.isArray(value)) return [];
 
   return value
@@ -137,24 +141,17 @@ function normalizeProducts(value: unknown): Product[] {
       if (!item || typeof item !== "object") return null;
 
       const id = Number(item.id);
-      const name = typeof item.name === "string" ? item.name : "";
       const image = typeof item.image === "string" ? item.image : "";
       const category =
         typeof item.category === "string" ? item.category : "";
       const subcategory =
         typeof item.subcategory === "string" ? item.subcategory : null;
 
-      if (!Number.isFinite(id) || !name || !category) return null;
+      if (!Number.isFinite(id) || !category) return null;
 
-      return {
-        id,
-        name,
-        image,
-        category,
-        subcategory,
-      } satisfies Product;
+      return { id, image, category, subcategory } satisfies SubcategoryThumbnailProduct;
     })
-    .filter(Boolean) as Product[];
+    .filter(Boolean) as SubcategoryThumbnailProduct[];
 }
 
 function MarqueeStyle() {
@@ -232,13 +229,22 @@ function BannerRow({
 
 type CategorySectionProps = {
   initialCategories?: Category[];
-  initialProducts?: Product[];
+  /**
+   * Server-supplied batched subcategory image map (homepage path).
+   * Key: `${categorySlug}:${subcategorySlug}` (lowercase).
+   * Value: representative product image URL.
+   *
+   * When provided (homepage with disableSelfFetch=true), no product DB reads occur.
+   * When absent (other call sites with !disableSelfFetch), falls back to bounded
+   * per-page API self-fetch and in-memory resolution.
+   */
+  subcategoryImageMap?: Record<string, string>;
   disableSelfFetch?: boolean;
 };
 
 export default function CategorySection({
   initialCategories,
-  initialProducts,
+  subcategoryImageMap: initialSubcategoryImageMap,
   disableSelfFetch = false,
 }: CategorySectionProps = {}) {
   const [categories, setCategories] = useState<Category[]>(() =>
@@ -246,7 +252,11 @@ export default function CategorySection({
       ? initialCategories
       : getDefaultPublicCategories()
   );
-  const [products, setProducts] = useState<Product[]>(() => initialProducts ?? []);
+  const [subcategoryImageMap, setSubcategoryImageMap] = useState<
+    Record<string, string>
+  >(() => initialSubcategoryImageMap ?? {});
+  // Bounded product list used only by the self-fetch fallback path for subcategory thumbnails.
+  const [products, setProducts] = useState<SubcategoryThumbnailProduct[]>([]);
 
   useEffect(() => {
     if (initialCategories && initialCategories.length > 0) {
@@ -255,10 +265,10 @@ export default function CategorySection({
   }, [initialCategories]);
 
   useEffect(() => {
-    if (initialProducts) {
-      setProducts(initialProducts);
+    if (initialSubcategoryImageMap) {
+      setSubcategoryImageMap(initialSubcategoryImageMap);
     }
-  }, [initialProducts]);
+  }, [initialSubcategoryImageMap]);
 
   useEffect(() => {
     if (disableSelfFetch) return;
@@ -275,7 +285,9 @@ export default function CategorySection({
         }))
         .catch(() => null);
 
-      const productRequest = fetch("/api/products", {
+      // Bounded product fetch for subcategory thumbnail fallback resolution.
+      // Uses the standard paginated envelope (data.items) — page 1 only.
+      const productRequest = fetch("/api/products?pageSize=24", {
         cache: "no-store",
       })
         .then(async (res) => ({
@@ -305,6 +317,7 @@ export default function CategorySection({
         }
       }
 
+      // Consume paginated envelope (data.items — no legacy .products fallback)
       const productList = productPayload?.data?.items;
       if (
         productPayload?.ok &&
@@ -332,7 +345,8 @@ export default function CategorySection({
     title: category.name,
     subtitle: "Collection",
     href: `/shop?category=${category.slug}`,
-    image: categoryImage(category, products),
+    // Parent category thumbnail uses Category.image (no product query needed)
+    image: categoryImage(category),
   }));
 
   if (visibleCategories.length === 0) return null;
@@ -357,7 +371,14 @@ export default function CategorySection({
                 title: subcategory.name,
                 subtitle: "Subcategory",
                 href: `/shop?category=${category.slug}&subcategory=${subcategory.slug}`,
-                image: subcategoryImage(category, subcategory, products),
+                // Homepage: resolved from batched subcategoryImageMap (zero per-subcategory queries)
+                // Other callers: falls back to bounded product list from self-fetch
+                image: resolveSubcategoryImage(
+                  category,
+                  subcategory,
+                  subcategoryImageMap,
+                  products
+                ),
               }));
 
             return (
@@ -374,5 +395,3 @@ export default function CategorySection({
     </section>
   );
 }
-
-

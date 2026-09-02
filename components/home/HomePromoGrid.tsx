@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import SafeImage from "@/components/ui/SafeImage";
 
-type Product = {
+type HomepagePromoProduct = {
   id: number;
   name: string;
   image: string;
-  isHotDeal?: boolean;
   createdAt?: string;
 };
 
@@ -31,12 +30,6 @@ const fallbackWide: HomePromo = {
   isActive: true,
   sortOrder: 1,
 };
-
-function newestFirst(a: Product, b: Product) {
-  const at = a.createdAt ? new Date(a.createdAt).getTime() : a.id;
-  const bt = b.createdAt ? new Date(b.createdAt).getTime() : b.id;
-  return bt - at;
-}
 
 function PromoTile({
   href,
@@ -100,24 +93,32 @@ function PromoTile({
 }
 
 type HomePromoGridProps = {
-  initialProducts?: Product[];
+  /** Direct server-supplied newest product (homepage path — bounded, no full product list). */
+  newestProduct?: HomepagePromoProduct | null;
+  /** Direct server-supplied hot-deal product (homepage path — bounded, no full product list). */
+  hotDealProduct?: HomepagePromoProduct | null;
   initialWide?: HomePromo | null;
   disableSelfFetch?: boolean;
 };
 
 export default function HomePromoGrid({
-  initialProducts,
+  newestProduct: initialNewest = null,
+  hotDealProduct: initialHotDeal = null,
   initialWide,
   disableSelfFetch = false,
 }: HomePromoGridProps = {}) {
-  const [products, setProducts] = useState<Product[]>(() => initialProducts ?? []);
+  const [newestProduct, setNewestProduct] =
+    useState<HomepagePromoProduct | null>(() => initialNewest);
+  const [hotDealProduct, setHotDealProduct] =
+    useState<HomepagePromoProduct | null>(() => initialHotDeal);
   const [wide, setWide] = useState<HomePromo>(() => initialWide ?? fallbackWide);
 
   useEffect(() => {
-    if (initialProducts) {
-      setProducts(initialProducts);
+    if (initialNewest !== undefined || initialHotDeal !== undefined) {
+      if (initialNewest !== undefined) setNewestProduct(initialNewest);
+      if (initialHotDeal !== undefined) setHotDealProduct(initialHotDeal);
     }
-  }, [initialProducts]);
+  }, [initialNewest, initialHotDeal]);
 
   useEffect(() => {
     if (initialWide) {
@@ -138,9 +139,25 @@ export default function HomePromoGrid({
         const productData = await productRes.json();
         const wideData = await wideRes.json();
 
+        // Self-fetch path: consume paginated envelope (items array, not legacy .products)
         const productList = productData?.items;
         if (productRes.ok && productData?.success && Array.isArray(productList)) {
-          setProducts(productList);
+          // Derive newest: sort by createdAt desc, fallback to id desc
+          const sorted = [...productList].sort(
+            (a: HomepagePromoProduct, b: HomepagePromoProduct) => {
+              const at = a.createdAt ? new Date(a.createdAt).getTime() : a.id;
+              const bt = b.createdAt ? new Date(b.createdAt).getTime() : b.id;
+              return bt - at;
+            }
+          );
+          setNewestProduct(sorted[0] ?? null);
+
+          // Derive hot deal: first item with isHotDeal flag
+          const hotDeal =
+            (productList as Array<HomepagePromoProduct & { isHotDeal?: boolean }>).find(
+              (p) => p.isHotDeal === true
+            ) ?? null;
+          setHotDealProduct(hotDeal);
         }
 
         if (wideRes.ok && wideData?.success && Array.isArray(wideData.items)) {
@@ -155,14 +172,6 @@ export default function HomePromoGrid({
 
     loadData();
   }, [disableSelfFetch]);
-
-  const newestProduct = useMemo(() => {
-    return [...products].sort(newestFirst)[0] || null;
-  }, [products]);
-
-  const hotDealProduct = useMemo(() => {
-    return products.find((product) => product.isHotDeal === true) || null;
-  }, [products]);
 
   return (
     <section className="bg-[#fcf8f6] px-3 py-4 sm:px-4 md:px-6 lg:px-8">

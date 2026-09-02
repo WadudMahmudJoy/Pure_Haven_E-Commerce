@@ -10,6 +10,10 @@ import Footer from "@/components/layout/Footer";
 import { getCachedCategoryRows } from "@/lib/catalogRead";
 import { getDefaultPublicCategories } from "@/lib/defaultCategories";
 import { prisma } from "@/lib/prisma";
+import {
+  getHomepagePromos,
+  getRepresentativeSubcategoryImages,
+} from "@/lib/catalog/homepageQueries";
 
 export const revalidate = 60;
 
@@ -49,55 +53,40 @@ function activePromosByKind(promos: HomePromo[], kind: string) {
 }
 
 async function getHomePageData() {
-  const [categoryRows, products, promos, footer] = await Promise.all([
-    getCachedCategoryRows(false).catch(() => getDefaultPublicCategories()),
-    prisma.product
-      .findMany({
-        where: { isActive: true, deletedAt: null },
-        orderBy: [{ id: "desc" }],
-        select: {
-          id: true,
-          name: true,
-          image: true,
-          category: true,
-          subcategory: true,
-          isHotDeal: true,
-          createdAt: true,
-        },
-      })
-      .then((rows) =>
-        rows.map((product) => ({
-          ...product,
-          createdAt: product.createdAt.toISOString(),
-        }))
-      )
-      .catch(() => []),
-    prisma.homePromo
-      .findMany({
-        where: { isActive: true },
-        orderBy: { sortOrder: "asc" },
-      })
-      .then((rows) =>
-        rows.map((p) => ({
-          id: String(p.id),
-          kind: p.kind,
-          label: p.label,
-          title: p.title,
-          subtitle: p.subtitle,
-          image: p.image,
-          href: p.href,
-          isActive: p.isActive,
-          sortOrder: p.sortOrder,
-        }))
-      )
-      .catch(() => []),
-    prisma.footerSettings
-      .findFirst({
-        orderBy: { id: "asc" },
-        include: { links: { orderBy: { sortOrder: "asc" } } },
-      })
-      .catch(() => null),
-  ]);
+  const [categoryRows, homepagePromos, subcategoryImageMap, promos, footer] =
+    await Promise.all([
+      getCachedCategoryRows(false).catch(() => getDefaultPublicCategories()),
+      getHomepagePromos().catch(() => ({
+        newestProduct: null,
+        hotDealProduct: null,
+      })),
+      getRepresentativeSubcategoryImages().catch(() => ({})),
+      prisma.homePromo
+        .findMany({
+          where: { isActive: true },
+          orderBy: { sortOrder: "asc" },
+        })
+        .then((rows) =>
+          rows.map((p) => ({
+            id: String(p.id),
+            kind: p.kind,
+            label: p.label,
+            title: p.title,
+            subtitle: p.subtitle,
+            image: p.image,
+            href: p.href,
+            isActive: p.isActive,
+            sortOrder: p.sortOrder,
+          }))
+        )
+        .catch(() => []),
+      prisma.footerSettings
+        .findFirst({
+          orderBy: { id: "asc" },
+          include: { links: { orderBy: { sortOrder: "asc" } } },
+        })
+        .catch(() => null),
+    ]);
 
   let footerSettings: Partial<FooterSettings> = {};
   if (footer) {
@@ -133,7 +122,9 @@ async function getHomePageData() {
 
   return {
     categories: categoryRows,
-    products,
+    newestProduct: homepagePromos.newestProduct,
+    hotDealProduct: homepagePromos.hotDealProduct,
+    subcategoryImageMap,
     sliderPromos: activePromosByKind(promos, "slider"),
     widePromo: activePromosByKind(promos, "wide")[0] ?? null,
     footerSettings,
@@ -150,14 +141,15 @@ export default async function HomePage() {
 
       <HomeHeroSlider initialSlides={data.sliderPromos} disableSelfFetch />
       <HomePromoGrid
-        initialProducts={data.products}
+        newestProduct={data.newestProduct}
+        hotDealProduct={data.hotDealProduct}
         initialWide={data.widePromo}
         disableSelfFetch
       />
 
       <CategorySection
         initialCategories={data.categories}
-        initialProducts={data.products}
+        subcategoryImageMap={data.subcategoryImageMap}
         disableSelfFetch
       />
 
@@ -168,4 +160,3 @@ export default async function HomePage() {
     </>
   );
 }
-
