@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Catalog Safety & Explicit Stock Adjustment Behavioral Tests — Wave C (Task 9)
  *
@@ -14,7 +15,7 @@
  */
 
 import "dotenv/config";
-import { describe, it, afterEach, test } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -70,7 +71,7 @@ it("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB 
     id: 10,
     name: "Lipstick",
     price: 500,
-    image: "/lip.png",
+    image: "/uploads/products/lip.png",
     category: "Lips",
     stock: 25,
     variants: [
@@ -81,6 +82,19 @@ it("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB 
 
   (prisma.$transaction as any) = async (callback: any) => {
     const mockTx: any = {
+      product: {
+        findUnique: async () => ({ id: 10, deletedAt: null }),
+        update: async (args: any) => {
+          updatedProductData = args;
+          return { id: 10, ...args.data };
+        },
+      },
+      productImage: {
+        findMany: async () => [],
+        create: async (args: any) => ({ id: 1, ...args.data }),
+        update: async (args: any) => ({ id: args.where.id, ...args.data }),
+        deleteMany: async () => ({ count: 0 }),
+      },
       category: {
         findFirst: async () => ({ id: 1, name: "Lips", slug: "lips" }),
         findUnique: async () => ({ id: 1, name: "Lips", slug: "lips" }),
@@ -95,12 +109,6 @@ it("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB 
           return { id: args.where.id, ...args.data, stock: 15 };
         },
       },
-      product: {
-        update: async (args: any) => {
-          updatedProductData = args;
-          return { id: 10, ...args.data };
-        },
-      },
     };
     return await callback(mockTx);
   };
@@ -109,7 +117,7 @@ it("Task 9 — PUT /api/products Preserves Variant ID and Does Not Overwrite DB 
     id: 10,
     name: "Updated Lipstick",
     price: 550,
-    image: "/lip-updated.png",
+    image: "/uploads/products/lip-updated.png",
     category: "Lips",
     stock: 999, // Stale client stock snapshot (should be ignored!)
     variants: [
@@ -147,7 +155,7 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reservat
     id: 10,
     name: "Lipstick",
     price: 500,
-    image: "/lip.png",
+    image: "/uploads/products/lip.png",
     category: "Lips",
     stock: 10,
     variants: [
@@ -158,6 +166,15 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reservat
 
   (prisma.$transaction as any) = async (callback: any) => {
     const mockTx: any = {
+      product: {
+        findUnique: async () => ({ id: 10, deletedAt: null }),
+      },
+      productImage: {
+        findMany: async () => [],
+        create: async (args: any) => ({ id: 1, ...args.data }),
+        update: async (args: any) => ({ id: args.where.id, ...args.data }),
+        deleteMany: async () => ({ count: 0 }),
+      },
       productVariant: {
         findMany: async () => [
           { id: 101, productId: 10, label: "Red", stock: 5 },
@@ -185,7 +202,7 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with Active Reservat
     id: 10,
     name: "Lipstick",
     price: 500,
-    image: "/lip.png",
+    image: "/uploads/products/lip.png",
     category: "Lips",
     variants: [
       { id: 101, label: "Red", price: 500 },
@@ -337,7 +354,7 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with FULFILLED Reser
     id: 30,
     name: "Serum",
     price: 600,
-    image: "/serum.png",
+    image: "/uploads/products/serum.png",
     category: "Skincare",
     stock: 10,
     variants: [
@@ -348,6 +365,15 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with FULFILLED Reser
 
   (prisma.$transaction as any) = async (callback: any) => {
     const mockTx: any = {
+      product: {
+        findUnique: async () => ({ id: 30, deletedAt: null }),
+      },
+      productImage: {
+        findMany: async () => [],
+        create: async (args: any) => ({ id: 1, ...args.data }),
+        update: async (args: any) => ({ id: args.where.id, ...args.data }),
+        deleteMany: async () => ({ count: 0 }),
+      },
       productVariant: {
         findMany: async () => [
           { id: 301, productId: 30, label: "30ml", stock: 5 },
@@ -376,7 +402,7 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with FULFILLED Reser
     id: 30,
     name: "Serum",
     price: 600,
-    image: "/serum.png",
+    image: "/uploads/products/serum.png",
     category: "Skincare",
     variants: [
       { id: 301, label: "30ml", price: 600 },

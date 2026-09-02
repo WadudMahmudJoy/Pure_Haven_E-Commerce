@@ -17,6 +17,10 @@ import {
   getAdminProductDetailQuery,
   getAdminLowStockCount,
 } from "@/lib/catalog/adminCatalogQuery";
+import {
+  parseGalleryWriteIntent,
+  applyGalleryMutation,
+} from "@/lib/catalog/galleryWrite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -301,6 +305,17 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json();
+
+    // 1. Syntactic gallery validation & conflict check BEFORE lookup/transaction
+    const galleryParsed = parseGalleryWriteIntent(body);
+    if (!galleryParsed.ok) {
+      return NextResponse.json(
+        { success: false, message: galleryParsed.message },
+        { status: galleryParsed.statusCode }
+      );
+    }
+    const galleryIntent = galleryParsed.intent;
+
     const id = validId(body.id);
 
     if (!id) {
@@ -323,12 +338,11 @@ export async function PUT(req: Request) {
     }
 
     const name = text(body.name);
-    const image = text(body.image);
     const category = text(body.category);
 
-    if (!name || !image || !category) {
+    if (!name || !category) {
       return NextResponse.json(
-        { success: false, message: "Name, image, and category are required." },
+        { success: false, message: "Name and category are required." },
         { status: 400 }
       );
     }
@@ -381,6 +395,31 @@ export async function PUT(req: Request) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Step A: Re-read target Product inside transaction and verify exists and not soft-deleted
+      const targetProduct = await tx.product.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          deletedAt: true,
+        },
+      });
+
+      if (!targetProduct) {
+        const err = Object.assign(new Error("Product not found."), { statusCode: 404 });
+        throw err;
+      }
+
+      if (targetProduct.deletedAt !== null) {
+        const err = Object.assign(new Error("Cannot edit a soft-deleted product."), { statusCode: 400 });
+        throw err;
+      }
+
+      // Step B: Apply gallery mutation
+      const { primaryImageOverride } = await applyGalleryMutation(tx, {
+        productId: id,
+        intent: galleryIntent,
+      });
+
       // Check omitted variants for active inventory reservations before deleting
       for (const ev of existing.variants) {
         if (!submittedVariantIds.has(ev.id)) {
@@ -470,23 +509,25 @@ export async function PUT(req: Request) {
         }
       }
 
+      const productUpdateData = {
+        name,
+        price,
+        compareAtPrice,
+        ...(primaryImageOverride !== undefined ? { image: primaryImageOverride } : {}),
+        category: resolvedCategoryName,
+        categoryId,
+        subcategory: optionalText(body.subcategory),
+        description: optionalText(body.description),
+        stock: hasAnyVariants ? finalProductStock : undefined, // Preserve existing stock if non-variant
+        isHotDeal: boolValue(body.isHotDeal),
+        isUpcoming: boolValue(body.isUpcoming),
+        badgeText: optionalText(body.badgeText),
+        badgeTone: badgeToneValue(body.badgeTone),
+      };
+
       const updatedProduct = await tx.product.update({
         where: { id },
-        data: {
-          name,
-          price,
-          compareAtPrice,
-          image,
-          category: resolvedCategoryName,
-          categoryId,
-          subcategory: optionalText(body.subcategory),
-          description: optionalText(body.description),
-          stock: hasAnyVariants ? finalProductStock : undefined, // Preserve existing stock if non-variant
-          isHotDeal: boolValue(body.isHotDeal),
-          isUpcoming: boolValue(body.isUpcoming),
-          badgeText: optionalText(body.badgeText),
-          badgeTone: badgeToneValue(body.badgeTone),
-        },
+        data: productUpdateData,
         include: { variants: { orderBy: { id: "asc" } } },
       });
 
@@ -497,6 +538,20 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({ success: true, product: result }, { headers: publicCacheHeaders() });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      "statusCode" in error &&
+      typeof (error as { statusCode: unknown }).statusCode === "number"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: error.message,
+        },
+        { status: (error as { statusCode: number }).statusCode }
+      );
+    }
+
     if (error instanceof Error && error.message.startsWith("VARIANT_RESERVED_ACTIVE:")) {
       const vid = error.message.split(":")[1];
       return NextResponse.json(
