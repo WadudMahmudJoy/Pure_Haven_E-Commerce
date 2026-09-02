@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Heart, ShoppingCart } from "lucide-react";
 import { useCart } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
-import SafeImage from "@/components/ui/SafeImage";
+import ProductCardCarousel from "./ProductCardCarousel";
 import { normalizeImageSrc } from "@/lib/imagePaths";
 import {
   resolveEyebrow,
@@ -41,6 +41,7 @@ export default function ProductCard(props: ProductCardProps) {
     price,
     compareAtPrice,
     image,
+    images,
     category,
     categoryName,
     subcategoryName,
@@ -51,8 +52,12 @@ export default function ProductCard(props: ProductCardProps) {
     badgeTone,
   } = props;
 
-  // images is data-only in Task 6 (single image rendering)
-  void props.images;
+  const effectiveImages = useMemo(() => {
+    if (Array.isArray(images) && images.length > 0) {
+      return images.slice(0, 4);
+    }
+    return [image];
+  }, [images, image]);
 
   const [justAddedToCart, setJustAddedToCart] = useState(false);
   const [wishlistTouched, setWishlistTouched] = useState(false);
@@ -153,16 +158,12 @@ export default function ProductCard(props: ProductCardProps) {
   return (
     <div className="group overflow-hidden rounded-[18px] border border-[#ead9d1] bg-white p-2.5 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:shadow-md sm:rounded-[22px] sm:p-3 lg:rounded-[28px] lg:p-4">
       <div className="relative">
-        <Link href={`/product/${id}`} className="block">
-          <div className="overflow-hidden rounded-[14px] bg-[#f8f3ef] sm:rounded-[18px] lg:rounded-[22px]">
-            <SafeImage
-              src={imageSrc}
-              alt={name}
-              category={category}
-              className="aspect-square w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-            />
-          </div>
-        </Link>
+        <ProductCardCarousel
+          productId={id}
+          productName={name}
+          category={category}
+          images={effectiveImages}
+        />
 
         {cardBadge ? (
           <span

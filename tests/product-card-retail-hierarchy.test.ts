@@ -221,11 +221,6 @@ describe("Task 6 — ProductCard Retail Hierarchy & Presentation Contract", () =
       assert.ok(!cardSource.includes("toggleWishlist({\n      id,\n      name,\n      price,\n      image: imageSrc,\n      category,\n      images"));
     });
 
-    it("S. TASK-7 NON-IMPLEMENTATION: No carousel, swipe, dots, or secondary image mounting", () => {
-      const lower = cardSource.toLowerCase();
-      assert.ok(!lower.includes("carousel"), "Must not include carousel in Task 6");
-      assert.ok(!lower.includes("swiper"), "Must not include swiper in Task 6");
-      assert.ok(!lower.includes("dot"), "Must not include carousel dots in Task 6");
-    });
+    // Task-7 carousel behavior is verified by tests/product-card-carousel.test.ts.
   });
 });
