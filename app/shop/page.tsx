@@ -2,20 +2,17 @@ import Link from "next/link";
 import TopBar from "@/components/layout/TopBar";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import LoadMoreProducts from "@/components/shop/LoadMoreProducts";
+import ProgressiveProductGrid from "@/components/shop/ProgressiveProductGrid";
 import SafeImage from "@/components/ui/SafeImage";
-import { getProducts, type Product } from "@/lib/getProducts";
 import { getCachedCategoryRows } from "@/lib/catalogRead";
+import { parsePublicCatalogParams } from "@/lib/catalog/queryParams";
+import { getPublicCatalogQuery } from "@/lib/catalog/publicCatalogQuery";
+import type { ParsedPublicCatalogParams } from "@/lib/catalog/types";
 
 export const revalidate = 60;
 
 type ShopPageProps = {
-  searchParams?: Promise<{
-    category?: string;
-    subcategory?: string;
-    q?: string;
-    sort?: string;
-  }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 type ShopCategory = {
@@ -30,49 +27,18 @@ type ShopCategory = {
   }[];
 };
 
-
-function slug(value?: string | null) {
-  return (value || "").trim().toLowerCase().replace(/\s+/g, "-");
-}
-
-function label(value?: string | null) {
-  return (value || "")
-    .split("-")
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-function cleanQuery(value?: string | null) {
-  return (value || "").trim().toLowerCase();
-}
-
-function sortProducts(products: Product[], sort?: string) {
-  const sorted = [...products];
-
-  if (sort === "price-asc") {
-    return sorted.sort((a, b) => Number(a.price) - Number(b.price));
-  }
-
-  if (sort === "price-desc") {
-    return sorted.sort((a, b) => Number(b.price) - Number(a.price));
-  }
-
-  return sorted.sort((a, b) => Number(b.id) - Number(a.id));
-}
-
 function shopHref(options: {
-  category?: string;
-  subcategory?: string;
-  q?: string;
-  sort?: string;
+  category?: string | null;
+  subcategory?: string | null;
+  q?: string | null;
+  sort?: string | null;
 }) {
   const params = new URLSearchParams();
 
   if (options.category) params.set("category", options.category);
   if (options.subcategory) params.set("subcategory", options.subcategory);
   if (options.q) params.set("q", options.q);
-  if (options.sort) params.set("sort", options.sort);
+  if (options.sort && options.sort !== "latest") params.set("sort", options.sort);
 
   const query = params.toString();
   return query ? `/shop?${query}` : "/shop";
@@ -89,74 +55,53 @@ async function getShopCategories(): Promise<ShopCategory[]> {
 const fallbackImage = "/images/categories/cosmetics.jpg";
 
 export default async function ShopPage({ searchParams }: ShopPageProps) {
-  const params = (await searchParams) || {};
-  const category = slug(params.category);
-  const subcategory = slug(params.subcategory);
-  const query = cleanQuery(params.q);
-  const sort = params.sort || "latest";
+  const resolvedSearchParams = (await searchParams) || {};
+  const parsedParams = parsePublicCatalogParams(resolvedSearchParams);
 
-  const [allProducts, categories] = await Promise.all([
-    getProducts(),
+  // Forced server-side initial query: exactly Page 1, pageSize 24, skip 0
+  const serverQueryParams: ParsedPublicCatalogParams = {
+    ...parsedParams,
+    page: 1,
+    pageSize: 24,
+    skip: 0,
+  };
+
+  const [catalogResult, categories] = await Promise.all([
+    getPublicCatalogQuery(serverQueryParams),
     getShopCategories(),
   ]);
 
-  const activeCategory = categories.find((item) => item.slug === category);
+  const category = parsedParams.category;
+  const subcategory = parsedParams.subcategory;
+  const query = parsedParams.q;
+  const sort = parsedParams.sort;
 
-  const categoryProducts = category
-    ? allProducts.filter((product) => slug(product.category) === category)
-    : allProducts;
+  const activeCategory = category
+    ? categories.find((item) => item.slug === category)
+    : undefined;
 
-  const searchProducts = query
-    ? categoryProducts.filter((product) => {
-        const searchableText = [
-          product.name,
-          product.category,
-          product.subcategory || "",
-          product.description || "",
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        return searchableText.includes(query);
-      })
-    : categoryProducts;
-
-  const categoryImage =
-    activeCategory?.image || categoryProducts[0]?.image || fallbackImage;
+  const categoryImage = activeCategory?.image || fallbackImage;
 
   const subcategories =
-    activeCategory?.subcategories.map((item) => {
-      const matchedProduct = categoryProducts.find(
-        (product) => slug(product.subcategory) === item.slug
-      );
-
-      return {
-        title: item.name,
-        slug: item.slug,
-        image: matchedProduct?.image || categoryImage,
-      };
-    }) || [];
-
-  const filteredProducts =
-    category && !subcategory && !query
-      ? []
-      : searchProducts.filter((product) =>
-          subcategory ? slug(product.subcategory) === subcategory : true
-        );
-
-  const visibleProducts = sortProducts(filteredProducts, sort);
+    activeCategory?.subcategories.map((item) => ({
+      title: item.name,
+      slug: item.slug,
+      image: categoryImage,
+    })) || [];
 
   const activeSubcategory = activeCategory?.subcategories.find(
     (item) => item.slug === subcategory
   );
 
   const activeTitle = query
-    ? `Search results for "${params.q}"`
+    ? `Search results for "${query}"`
     : activeCategory && activeSubcategory
       ? `${activeCategory.name} / ${activeSubcategory.name}`
       : activeCategory
         ? activeCategory.name
         : "All Products";
+
+  const queryKey = `${category || "all"}-${subcategory || "all"}-${query || ""}-${sort}`;
 
   return (
     <main>
@@ -183,20 +128,31 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
 
             {query ? (
               <p className="mt-2 text-sm text-neutral-600">
-                {visibleProducts.length} product
-                {visibleProducts.length === 1 ? "" : "s"} found
+                {catalogResult.totalItems} product
+                {catalogResult.totalItems === 1 ? "" : "s"} found
               </p>
             ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Link href="/shop" className="text-sm font-semibold underline">
+            <Link
+              href="/shop"
+              className={`text-sm ${
+                !category && !subcategory && !query && sort === "latest"
+                  ? "font-semibold underline"
+                  : "font-medium text-[#7a5244] hover:underline"
+              }`}
+            >
               All Products
             </Link>
 
             <Link
               href={shopHref({ category, subcategory, q: query, sort: "latest" })}
-              className="text-sm font-medium text-[#7a5244] hover:underline"
+              className={`text-sm ${
+                sort === "latest"
+                  ? "font-semibold underline"
+                  : "font-medium text-[#7a5244] hover:underline"
+              }`}
             >
               Latest
             </Link>
@@ -208,7 +164,11 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
                 q: query,
                 sort: "price-asc",
               })}
-              className="text-sm font-medium text-[#7a5244] hover:underline"
+              className={`text-sm ${
+                sort === "price-asc"
+                  ? "font-semibold underline"
+                  : "font-medium text-[#7a5244] hover:underline"
+              }`}
             >
               Price Low to High
             </Link>
@@ -220,14 +180,18 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
                 q: query,
                 sort: "price-desc",
               })}
-              className="text-sm font-medium text-[#7a5244] hover:underline"
+              className={`text-sm ${
+                sort === "price-desc"
+                  ? "font-semibold underline"
+                  : "font-medium text-[#7a5244] hover:underline"
+              }`}
             >
               Price High to Low
             </Link>
           </div>
         </div>
 
-        {category && !subcategory && subcategories.length > 0 ? (
+        {activeCategory && !subcategory && subcategories.length > 0 ? (
           <div className="mb-10">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-2xl font-semibold text-[#2e221d]">
@@ -266,32 +230,18 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
           </div>
         ) : null}
 
-        {category && !subcategory && !query ? (
-          <div className="rounded-none border border-[#ead9d1] bg-white p-8 text-center">
-            <h2 className="text-xl font-semibold text-[#2e221d]">
-              Select a subcategory
-            </h2>
-            <p className="mt-2 text-sm text-neutral-600">
-              Products will appear after choosing a subcategory.
-            </p>
-          </div>
-        ) : visibleProducts.length === 0 ? (
-          <div className="rounded-none border border-[#ead9d1] bg-white p-8 text-center">
-            <h2 className="text-xl font-semibold text-[#2e221d]">
-              No products found
-            </h2>
-            <p className="mt-2 text-sm text-neutral-600">
-              Products will appear here when available.
-            </p>
-          </div>
-        ) : (
-          <LoadMoreProducts
-            products={visibleProducts}
-            gridClassName="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 lg:gap-6"
-            initialLimit={12}
-            step={12}
-          />
-        )}
+        <ProgressiveProductGrid
+          key={queryKey}
+          initialProducts={catalogResult.items}
+          initialHasMore={catalogResult.hasMore}
+          initialTotalItems={catalogResult.totalItems}
+          category={category}
+          subcategory={subcategory}
+          q={query}
+          sort={sort}
+          requestedPage={parsedParams.page}
+          gridClassName="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 lg:gap-6"
+        />
       </section>
 
       <Footer />
