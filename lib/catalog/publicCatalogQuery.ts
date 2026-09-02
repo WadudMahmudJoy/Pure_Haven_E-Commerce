@@ -245,3 +245,59 @@ export async function getPublicProductDetailQuery(
     variants,
   };
 }
+
+/**
+ * Keyset-paginated batch reader for sitemap generation.
+ *
+ * Invariants:
+ *   - id ASC ordering
+ *   - keyset traversal (id > afterId) with zero OFFSET/skip
+ *   - active + non-deleted lifecycle only
+ *   - minimal projection: strictly id and updatedAt
+ *   - defensive bounds: take defaults to 1000, capped at 1000, fails closed on invalid take
+ */
+export async function getSitemapProductRowsBatch(params?: {
+  afterId?: number;
+  take?: number;
+}): Promise<
+  Array<{
+    id: number;
+    updatedAt: Date;
+  }>
+> {
+  const DEFAULT_SITEMAP_BATCH_SIZE = 1000;
+  const MAX_SITEMAP_BATCH_SIZE = 1000;
+
+  let take = DEFAULT_SITEMAP_BATCH_SIZE;
+
+  if (params?.take !== undefined) {
+    const rawTake = params.take;
+    if (
+      typeof rawTake !== "number" ||
+      !Number.isInteger(rawTake) ||
+      rawTake < 1 ||
+      rawTake > MAX_SITEMAP_BATCH_SIZE
+    ) {
+      throw new Error(
+        `Invalid take parameter: ${rawTake}. Must be an integer between 1 and ${MAX_SITEMAP_BATCH_SIZE}.`
+      );
+    }
+    take = rawTake;
+  }
+
+  const where: Prisma.ProductWhereInput = {
+    isActive: true,
+    deletedAt: null,
+    ...(params?.afterId !== undefined ? { id: { gt: params.afterId } } : {}),
+  };
+
+  return prisma.product.findMany({
+    where,
+    orderBy: [{ id: "asc" }],
+    take,
+    select: {
+      id: true,
+      updatedAt: true,
+    },
+  });
+}
