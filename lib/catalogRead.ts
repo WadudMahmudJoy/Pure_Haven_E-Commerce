@@ -64,6 +64,10 @@ export async function getCachedProductRow(id: number) {
           where: { isActive: true },
           orderBy: { id: "asc" },
         },
+        images: {
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+          select: { url: true },
+        },
       },
     })
   );

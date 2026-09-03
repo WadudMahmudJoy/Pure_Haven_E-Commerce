@@ -21,6 +21,7 @@ type Product = {
   price: number;
   compareAtPrice?: number | null;
   image: string;
+  images?: string[];
   category: string;
   subcategory?: string;
   description?: string;
@@ -36,6 +37,12 @@ type ProductDetailsClientProps = {
 export default function ProductDetailsClient({ product }: ProductDetailsClientProps) {
   const { addToCart } = useCart();
 
+  // Effective base gallery: relational images if present, else [product.image] fallback
+  const baseGallery: string[] =
+    Array.isArray(product.images) && product.images.length > 0
+      ? product.images
+      : [product.image];
+
   const variants = product.variants || [];
   const firstAvailableVariant =
     variants.find((variant) => Number(variant.stock) > 0) || variants[0] || null;
@@ -43,6 +50,7 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(
     firstAvailableVariant?.id ?? null
   );
+  const [selectedBaseIdx, setSelectedBaseIdx] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
   const [stockNotice, setStockNotice] = useState("");
@@ -53,8 +61,12 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
 
   const activePrice = selectedVariant ? selectedVariant.price : product.price;
   const activeStock = selectedVariant ? selectedVariant.stock : product.stock ?? 0;
+
+  // Variant image is a presentation override only — does NOT mutate base gallery
+  const variantImage = selectedVariant?.image?.trim() || null;
+  const selectedBaseGalleryImage = baseGallery[selectedBaseIdx] ?? baseGallery[0];
   const activeImage = normalizeImageSrc(
-    selectedVariant?.image?.trim() ? selectedVariant.image : product.image,
+    variantImage ? variantImage : selectedBaseGalleryImage,
     { category: product.category }
   );
 
@@ -143,6 +155,40 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                 priority
               />
             </div>
+
+            {/* Base gallery thumbnail strip — only shown when gallery has > 1 image */}
+            {baseGallery.length > 1 ? (
+              <div
+                className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                aria-label="Product image gallery"
+              >
+                {baseGallery.map((imgUrl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setSelectedBaseIdx(idx)}
+                    aria-current={selectedBaseIdx === idx ? "true" : undefined}
+                    aria-label={`Show product image ${idx + 1} of ${baseGallery.length}`}
+                    className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border bg-white transition ${
+                      selectedBaseIdx === idx
+                        ? "border-[#2e221d] ring-2 ring-[#2e221d]/20"
+                        : "border-[#ead9d1] hover:border-[#7a5244]"
+                    }`}
+                  >
+                    <SafeImage
+                      src={normalizeImageSrc(imgUrl, { category: product.category })}
+                      alt={`Product image ${idx + 1}`}
+                      category={product.category}
+                      className="h-full w-full object-cover"
+                      width={128}
+                      height={128}
+                      sizes="64px"
+                      quality={70}
+                    />
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             {variants.length > 0 ? (
               <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

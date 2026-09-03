@@ -19,6 +19,7 @@ export type Product = {
   price: number;
   compareAtPrice?: number | null;
   image: string;
+  images?: string[];
   category: string;
   subcategory?: string;
   description?: string;
@@ -30,7 +31,30 @@ export type Product = {
   badgeTone?: string;
 };
 
-function mapProduct(product: any): Product {
+function mapProduct(product: {
+  id: number;
+  name: string;
+  price: { toNumber(): number } | number;
+  compareAtPrice?: { toNumber(): number } | number | null;
+  image: string;
+  images?: Array<{ url: string }>;
+  category: string;
+  subcategory?: string | null;
+  description?: string | null;
+  stock?: number | null;
+  variants?: Array<{ id: number; label: string; price: { toNumber(): number } | number; stock?: number | null; image?: string | null }>;
+  isHotDeal?: boolean | null;
+  isUpcoming?: boolean | null;
+  badgeText?: string | null;
+  badgeTone?: string | null;
+}): Product {
+  const relationalImages = Array.isArray(product.images)
+    ? product.images.map((img) => img.url)
+    : [];
+
+  const images =
+    relationalImages.length > 0 ? relationalImages : [product.image];
+
   return {
     id: product.id,
     name: product.name,
@@ -38,12 +62,13 @@ function mapProduct(product: any): Product {
     compareAtPrice:
       product.compareAtPrice == null ? null : Number(product.compareAtPrice),
     image: product.image,
+    images,
     category: product.category,
     subcategory: product.subcategory ?? undefined,
     description: product.description ?? undefined,
     stock: product.stock ?? 0,
     variants: Array.isArray(product.variants)
-      ? product.variants.map((variant: any) => ({
+      ? product.variants.map((variant) => ({
           id: variant.id,
           label: variant.label,
           price: Number(variant.price),
