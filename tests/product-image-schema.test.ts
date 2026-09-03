@@ -35,7 +35,7 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
       'SELECT name FROM "Product" WHERE name = ANY($1::text[])',
       [expectedFixtures]
     );
-    const foundNames = new Set(fixtureRes.rows.map((r: any) => r.name));
+    const foundNames = new Set(fixtureRes.rows.map((r: { name: string }) => r.name));
     for (const name of expectedFixtures) {
       if (!foundNames.has(name)) {
         throw new Error(`Required pre-seeded fixture '${name}' is missing in disposable database`);
@@ -60,7 +60,15 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'ProductImage'
     `);
-    const cols = Object.fromEntries(colRes.rows.map((r: any) => [r.column_name, r]));
+    interface ColumnRow {
+      column_name: string;
+      data_type: string;
+      is_nullable: string;
+      column_default: string | null;
+    }
+    const cols = Object.fromEntries(
+      (colRes.rows as ColumnRow[]).map((r) => [r.column_name, r])
+    );
 
     assert.ok(cols.id, "id column must exist");
     assert.strictEqual(cols.id.data_type, "integer");
@@ -104,7 +112,13 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
       WHERE tc.table_name = 'ProductImage' AND tc.constraint_type = 'FOREIGN KEY'
     `);
     assert.ok(res.rows.length >= 1, "Foreign key constraint must exist on ProductImage");
-    const fk = res.rows.find((r: any) => r.column_name === "productId");
+    interface FkRow {
+      column_name: string;
+      foreign_table_name: string;
+      foreign_column_name: string;
+      delete_rule: string;
+    }
+    const fk = (res.rows as FkRow[]).find((r) => r.column_name === "productId");
     assert.ok(fk, "Foreign key on productId must exist");
     assert.strictEqual(fk.foreign_table_name, "Product", "Foreign table must be Product");
     assert.strictEqual(fk.foreign_column_name, "id", "Foreign column must be id");
@@ -131,7 +145,7 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
       ORDER BY a.attnum
     `);
     assert.strictEqual(res.rows.length, 2, "Unique index on (productId, sortOrder) must exist and cover 2 columns");
-    const cols = res.rows.map((r: any) => r.column_name);
+    const cols = (res.rows as Array<{ column_name: string }>).map((r) => r.column_name);
     assert.ok(cols.includes("productId") && cols.includes("sortOrder"), "Unique index must cover productId and sortOrder");
   });
 
@@ -143,7 +157,7 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
     assert.strictEqual(
       res.rows.length,
       2,
-      `Expected exactly 2 indexes on ProductImage (pkey + unique), found ${res.rows.length}: ${res.rows.map((r: any) => r.indexname).join(", ")}`
+      `Expected exactly 2 indexes on ProductImage (pkey + unique), found ${res.rows.length}: ${(res.rows as Array<{ indexname: string }>).map((r) => r.indexname).join(", ")}`
     );
   });
 
@@ -216,14 +230,14 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
     `);
     assert.ok(prodRes.rows.length > 0, "Seeded active product must exist");
     const activeId = prodRes.rows[0].id;
-    let error: any = null;
+    let error: { code?: string } | null = null;
     try {
       await client.query(
         'INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt") VALUES ($1, $2, $3, NOW(), NOW())',
         [activeId, "/uploads/products/duplicate.jpg", 1]
       );
-    } catch (err) {
-      error = err;
+    } catch (err: unknown) {
+      error = err as { code?: string };
     }
     assert.ok(error, "Expected duplicate insertion to fail");
     assert.strictEqual(error.code, "23505", "Error code must be 23505 (unique_violation)");
