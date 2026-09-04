@@ -203,14 +203,14 @@ describe("Task 8 — Responsive Navigation Hierarchy & Category Sorting", () => 
       assert.strictEqual(DESKTOP_NAV_PRIMARY_BUDGET, 4);
     });
 
-    it("B. Navbar desktop uses lg breakpoint (hidden lg:flex), not md ownership", () => {
+    it("B. Navbar desktop uses lg breakpoint (hidden lg:inline-flex), not md ownership", () => {
       const navbarSource = fs.readFileSync(
         path.join(process.cwd(), "components", "layout", "Navbar.tsx"),
         "utf8"
       );
 
-      assert.ok(navbarSource.includes("hidden items-center justify-center gap-5 border-t border-[#ead9d1] py-4 text-sm text-[#2e221d] lg:flex"));
-      assert.ok(!navbarSource.includes("py-4 text-sm text-[#2e221d] md:flex"));
+      assert.ok(navbarSource.includes("hidden lg:inline-flex"));
+      assert.ok(!navbarSource.includes("md:flex"));
       assert.ok(!navbarSource.includes("window.innerWidth"));
     });
 
@@ -219,48 +219,37 @@ describe("Task 8 — Responsive Navigation Hierarchy & Category Sorting", () => 
         React.createElement<NavbarProps>(Navbar, {
           initialCategories: testCategories,
           disableSelfFetch: true,
+          initialMegaMenuOpen: true,
         })
       );
 
-      // Primary categories (first 4): skincare, haircare, cosmetics, perfume
+      // Primary categories: skincare, haircare, cosmetics, perfume
       assert.ok(html.includes('href="/shop?category=skincare"'));
       assert.ok(html.includes('href="/shop?category=haircare"'));
       assert.ok(html.includes('href="/shop?category=cosmetics"'));
       assert.ok(html.includes('href="/shop?category=perfume"'));
     });
 
-    it("D. exactly one grouped More entry exists when overflow is non-empty (5 categories => 4 primary + 1 overflow)", () => {
+    it("D. Categories ▾ mega menu renders active categories into the mega-menu", () => {
       const html = renderToStaticMarkup(
         React.createElement<NavbarProps>(Navbar, {
           initialCategories: testCategories,
           disableSelfFetch: true,
+          initialMegaMenuOpen: true,
         })
       );
 
-      // More button exists
-      assert.ok(html.includes('aria-label="More categories"'));
-      assert.ok(html.includes('>More</span>'));
+      // Categories ▾ trigger exists
+      assert.ok(html.includes("Categories ▾"));
 
-      // Overflow category (Food) is inside the More panel
+      // Category Food is rendered
       assert.ok(html.includes('href="/shop?category=food"'));
 
       // Inactive category is excluded
       assert.ok(!html.includes('href="/shop?category=inactive-category"'));
     });
 
-    it("E. <=4 active categories produces NO More entry in desktop nav", () => {
-      const fourCategories = testCategories.slice(0, 4);
-      const html = renderToStaticMarkup(
-        React.createElement<NavbarProps>(Navbar, {
-          initialCategories: fourCategories,
-          disableSelfFetch: true,
-        })
-      );
-
-      assert.ok(!html.includes('aria-label="More categories"'));
-    });
-
-    it("F. More panel contains direct category Link and direct active subcategory links without nested flyouts", () => {
+    it("E. More button is removed from desktop nav (approved pre-Phase-6 cleanup)", () => {
       const html = renderToStaticMarkup(
         React.createElement<NavbarProps>(Navbar, {
           initialCategories: testCategories,
@@ -268,60 +257,74 @@ describe("Task 8 — Responsive Navigation Hierarchy & Category Sorting", () => 
         })
       );
 
-      // Overflow category Food links directly
+      assert.ok(!html.includes('aria-label="More categories"'));
+      assert.ok(!html.includes('>More</span>'));
+    });
+
+    it("F. Compact Category Picker renders direct category Link and omits subcategory links", () => {
+      const html = renderToStaticMarkup(
+        React.createElement<NavbarProps>(Navbar, {
+          initialCategories: testCategories,
+          disableSelfFetch: true,
+          initialMegaMenuOpen: true,
+        })
+      );
+
+      // Food category links directly
       assert.ok(html.includes('href="/shop?category=food"'));
-      // Subcategory Honey is rendered beneath Food
-      assert.ok(html.includes('href="/shop?category=food&amp;subcategory=honey"'));
+      // Subcategories are strictly omitted from compact category picker
+      assert.ok(!html.includes('subcategory=honey'));
     });
 
-    it("G. mobile category with active subcategories has two distinct sibling controls: Link and button", () => {
+    it("G. drawer and compact category picker render direct top-level category links", () => {
       const navbarSource = fs.readFileSync(
         path.join(process.cwd(), "components", "layout", "Navbar.tsx"),
         "utf8"
       );
 
-      // Verify sibling structure
-      assert.ok(navbarSource.includes('<div className="flex items-center justify-between">'));
+      // Verify direct category link structure in sidebar
+      assert.ok(navbarSource.includes('href={`/shop?category=${encodeURIComponent(category.slug)}`}'));
       assert.ok(navbarSource.includes('onClick={closeMenu}'));
-      assert.ok(navbarSource.includes('aria-expanded={isOpen}'));
-      assert.ok(navbarSource.includes('aria-controls={containerId}'));
     });
 
-    it("H. mobile disclosure button has >=44x44 touch target, Show/Hide accessible label, and visible focus ring", () => {
+    it("H. drawer renders PURE HAVEN BD, close button, and store links", () => {
       const navbarSource = fs.readFileSync(
         path.join(process.cwd(), "components", "layout", "Navbar.tsx"),
         "utf8"
       );
 
-      assert.ok(navbarSource.includes("min-h-[44px] min-w-[44px]"));
-      assert.ok(navbarSource.includes('Show subcategories for'));
-      assert.ok(navbarSource.includes('Hide subcategories for'));
-      assert.ok(navbarSource.includes('focus-visible:ring-2'));
+      assert.ok(navbarSource.includes('PURE HAVEN BD'));
+      assert.ok(navbarSource.includes('aria-label="Close menu"'));
+      assert.ok(navbarSource.includes('href="/shop"'));
     });
 
-    it("I. mobile category with ZERO active subcategories renders ONLY direct Link, no disclosure button", () => {
+    it("I. drawer categories omit subcategory disclosure accordions", () => {
       const navbarSource = fs.readFileSync(
         path.join(process.cwd(), "components", "layout", "Navbar.tsx"),
         "utf8"
       );
 
       assert.ok(
-        navbarSource.includes("{hasActiveSubs ? ("),
-        "Disclosure button must only be rendered if hasActiveSubs is true"
+        !navbarSource.includes("displaySubs"),
+        "Drawer must not render displaySubs"
+      );
+      assert.ok(
+        !navbarSource.includes("hasActiveSubs"),
+        "Drawer must not render hasActiveSubs disclosure logic"
       );
     });
 
-    it("J. inactive subcategories are strictly excluded from navigation paths", () => {
+    it("J. inactive categories and subcategories are strictly excluded from navigation paths", () => {
       const html = renderToStaticMarkup(
         React.createElement<NavbarProps>(Navbar, {
           initialCategories: testCategories,
           disableSelfFetch: true,
+          initialMegaMenuOpen: true,
         })
       );
 
-      assert.ok(html.includes('subcategory=serum'));
-      assert.ok(html.includes('subcategory=toner'));
       assert.ok(!html.includes('inactive-sub'), "Inactive subcategory must not be in rendered markup");
+      assert.ok(!html.includes('subcategory='), "Navbar compact category picker must not render subcategory links");
     });
 
     it("K. SafeMobileBottomNav remains untouched in repository layout architecture", () => {
@@ -352,24 +355,20 @@ describe("Task 8 — Responsive Navigation Hierarchy & Category Sorting", () => 
       assert.ok(!navbarSource.includes('name="q"'), "Must NOT use native name='q' attribute");
     });
 
-    it("M. responsive breakpoint contract: desktop nav has lg:flex, mobile trigger has lg:hidden and no md:hidden dead zone", () => {
+    it("M. responsive breakpoint contract: desktop controls use lg: breakpoint, menu trigger has aria-label and no md:hidden dead zone", () => {
       const navbarSource = fs.readFileSync(
         path.join(process.cwd(), "components", "layout", "Navbar.tsx"),
         "utf8"
       );
 
-      // Desktop nav owns >= 1024px
-      assert.ok(navbarSource.includes("lg:flex"), "Desktop nav must use lg:flex");
-
-      // Mobile/tablet menu trigger owns < 1024px
-      assert.ok(navbarSource.includes("lg:hidden"), "Mobile menu trigger must use lg:hidden");
+      // Desktop nav controls own >= 1024px
+      assert.ok(navbarSource.includes("lg:inline-flex"), "Desktop controls must use lg:inline-flex");
 
       // Verify no 768-1023 dead zone (trigger must not hide at md)
       const triggerIdx = navbarSource.indexOf('aria-label="Open menu"');
       assert.ok(triggerIdx !== -1, "Menu trigger button must exist");
       const triggerSnippet = navbarSource.slice(triggerIdx - 200, triggerIdx + 50);
       assert.ok(!triggerSnippet.includes("md:hidden"), "Mobile menu trigger must NOT hide at md");
-      assert.ok(triggerSnippet.includes("lg:hidden"), "Mobile menu trigger must hide at lg");
     });
   });
 });

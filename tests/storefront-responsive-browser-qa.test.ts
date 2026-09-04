@@ -988,116 +988,211 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
     );
   });
 
-  it("7. Desktop Navigation 1280x800: Hierarchy, first 4 primary, grouped More panel, keyboard reachability, direct category navigation", async () => {
+  it("7. Desktop Navigation 1280x800: Approved unified customer navbar, Categories ▾, brand, mega menu, direct navigation", async () => {
     await setViewport(1280, 800, false);
     await navigateAndWait(`http://localhost:${QA_PORT}`, 1000);
 
     const navAudit = await evaluateInPage<{
-      desktopNavVisible: boolean;
-      hamburgerHidden: boolean;
-      primaryCategoryLinks: string[];
-      hasMoreButton: boolean;
-      overflowCategoryLinks: string[];
-      zeroSubcategoryHasNoSubIndicator: boolean;
-      hasCanonicalSubcategoryLink: boolean;
-      allCategoryText: string;
+      navbarVisible: boolean;
+      brandText: string;
+      hasBrandExact: boolean;
+      hasCategoriesTrigger: boolean;
+      hasShopLink: boolean;
+      hasContactLink: boolean;
+      hasTrackOrderLink: boolean;
+      hasWishlistLink: boolean;
+      hasCartLink: boolean;
+      hasSearchAction: boolean;
+      isSearchFarRight: boolean;
+      hasHorizontalOverflow: boolean;
     }>(`
       (() => {
         const header = document.querySelector('header');
-        const desktopNav = header?.querySelector('nav');
-        const hamburger = header?.querySelector('button[aria-label="Open menu"]');
-
-        const primaryLinks = Array.from(desktopNav?.querySelectorAll(':scope > div.relative > a[href^="/shop?category="]') || [])
-          .map(a => a.textContent.trim());
-
-        const moreBtn = Array.from(desktopNav?.querySelectorAll('button') || [])
-          .find(b => b.textContent.includes('More'));
-
-        const moreContainer = moreBtn?.parentElement;
-        const overflowLinks = Array.from(moreContainer?.querySelectorAll('a[href^="/shop?category="]') || [])
-          .map(a => a.textContent.trim());
-
-        // Check category 2 (QA Skincare - zero subcategories)
-        const skincareItem = Array.from(desktopNav?.querySelectorAll(':scope > div.relative') || [])
-          .find(div => div.textContent.includes('QA Skincare'));
-        const skincareSubSvg = skincareItem?.querySelector('svg');
-
-        // Check canonical subcategory link
-        const subcategoryLinks = Array.from(desktopNav?.querySelectorAll('a[href*="subcategory="]') || []);
-        const hasCanonical = subcategoryLinks.some(a => {
-          const href = a.getAttribute('href') || '';
-          return href.includes('category=qa-fragrances') && href.includes('subcategory=qa-perfume-oil');
-        });
+        const brand = header?.querySelector('a[href="/"]')?.textContent?.trim() || '';
+        const categoriesBtn = Array.from(header?.querySelectorAll('button') || [])
+          .find(b => b.textContent?.includes('Categories ▾'));
+        const shopLink = header?.querySelector('a[href="/shop"]');
+        const contactLink = header?.querySelector('a[href="/contact"]');
+        const trackOrderLink = header?.querySelector('a[href="/track-order"]');
+        const wishlistLink = header?.querySelector('a[href="/wishlist"]');
+        const cartLink = header?.querySelector('a[href="/cart"]');
+        const searchForm = header?.querySelector('form');
+        const rightContainer = searchForm?.parentElement;
+        const isFarRight = rightContainer ? rightContainer.lastElementChild === searchForm : false;
 
         return {
-          desktopNavVisible: Boolean(desktopNav && getComputedStyle(desktopNav).display !== 'none'),
-          hamburgerHidden: Boolean(!hamburger || getComputedStyle(hamburger).display === 'none'),
-          primaryCategoryLinks: primaryLinks,
-          hasMoreButton: Boolean(moreBtn),
-          overflowCategoryLinks: overflowLinks,
-          zeroSubcategoryHasNoSubIndicator: Boolean(!skincareSubSvg),
-          hasCanonicalSubcategoryLink: hasCanonical,
-          allCategoryText: desktopNav?.textContent || ''
+          navbarVisible: Boolean(header && getComputedStyle(header).display !== 'none'),
+          brandText: brand,
+          hasBrandExact: brand.includes('PURE HAVEN BD'),
+          hasCategoriesTrigger: Boolean(categoriesBtn),
+          hasShopLink: Boolean(shopLink),
+          hasContactLink: Boolean(contactLink),
+          hasTrackOrderLink: Boolean(trackOrderLink),
+          hasWishlistLink: Boolean(wishlistLink),
+          hasCartLink: Boolean(cartLink),
+          hasSearchAction: Boolean(searchForm),
+          isSearchFarRight: isFarRight,
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
         };
       })()
     `);
 
-    assert.ok(navAudit.desktopNavVisible, "Desktop navigation must be visible at 1280x800");
-    assert.ok(navAudit.hamburgerHidden, "Mobile hamburger button must be hidden at 1280x800");
+    assert.ok(navAudit.navbarVisible, "One unified premium customer navbar must be visible at 1280x800");
+    assert.ok(navAudit.hasBrandExact, `Exact centered brand must contain 'PURE HAVEN BD', got '${navAudit.brandText}'`);
+    assert.ok(navAudit.hasCategoriesTrigger, "Desktop mega-menu trigger 'Categories ▾' must exist");
+    assert.ok(navAudit.hasShopLink, "Shop link must exist");
+    assert.ok(navAudit.hasContactLink, "Contact link must exist");
+    assert.ok(navAudit.hasTrackOrderLink, "Track Order link must exist");
+    assert.ok(navAudit.hasWishlistLink, "Wishlist link must exist");
+    assert.ok(navAudit.hasCartLink, "Cart link must exist");
+    assert.ok(navAudit.hasSearchAction, "Search action must exist");
+    assert.ok(navAudit.isSearchFarRight, "Search must remain far-right");
+    assert.strictEqual(navAudit.hasHorizontalOverflow, false, "Must have no horizontal page overflow at 1280x800");
 
-    // Exact primary category hierarchy
-    assert.deepStrictEqual(
-      navAudit.primaryCategoryLinks,
-      ["QA Fragrances", "QA Skincare", "QA Haircare", "QA Bodycare"],
-      "First 4 active categories must be primary direct links"
-    );
-
-    // Exact overflow category hierarchy
-    assert.deepStrictEqual(
-      navAudit.overflowCategoryLinks,
-      ["QA Cosmetics", "QA Essentials"],
-      "Overflow active categories must be grouped into More panel"
-    );
-
-    // Inactive category absent
-    assert.ok(!navAudit.allCategoryText.includes("QA Inactive Cat"), "Inactive category must be completely absent");
-
-    assert.ok(navAudit.hasMoreButton, "More button must exist when active categories > 4");
-    assert.ok(navAudit.zeroSubcategoryHasNoSubIndicator, "Zero-subcategory category must NOT have submenu arrow indicator");
-    assert.ok(navAudit.hasCanonicalSubcategoryLink, "Subcategory link must include canonical category and subcategory params");
-
-    // Keyboard focus accessibility: focus the More button and verify More dropdown opens
+    // Click Categories ▾ to verify compact category picker opens
     await evaluateInPage(`
       (() => {
-        const moreBtn = Array.from(document.querySelectorAll('header nav button'))
-          .find(b => b.textContent.includes('More'));
-        moreBtn?.focus();
+        const categoriesBtn = Array.from(document.querySelectorAll('header button'))
+          .find(b => b.textContent?.includes('Categories ▾'));
+        categoriesBtn?.click();
       })()
     `);
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 300));
 
-    const isMoreVisibleOnFocus = await evaluateInPage<boolean>(`
+    const pickerAudit = await evaluateInPage<{
+      isOpen: boolean;
+      alignsWithNavbar: boolean;
+      width: number;
+      gridCols: number;
+      categoryCount: number;
+      allSixInFirstRow: boolean;
+      hasSubcategories: boolean;
+      hasViewAll: boolean;
+      hasCollapseButton: boolean;
+      hasInternalHeading: boolean;
+    }>(`
       (() => {
-        const moreBtn = Array.from(document.querySelectorAll('header nav button'))
-          .find(b => b.textContent.includes('More'));
-        const moreContainer = moreBtn?.parentElement;
-        const panel = moreContainer?.querySelector('div.absolute');
-        return Boolean(panel && (getComputedStyle(panel).visibility === 'visible' || panel.classList.contains('group-focus-within:visible')));
+        const picker = document.getElementById('desktop-category-picker');
+        if (!picker) return { isOpen: false, alignsWithNavbar: false, width: 0, gridCols: 0, categoryCount: 0, allSixInFirstRow: false, hasSubcategories: false, hasViewAll: false, hasCollapseButton: false, hasInternalHeading: false };
+        const rect = picker.getBoundingClientRect();
+        const navContainer = picker.parentElement;
+        const navRect = navContainer ? navContainer.getBoundingClientRect() : rect;
+        const gridDiv = picker.querySelector('.grid');
+        const gridStyle = gridDiv ? window.getComputedStyle(gridDiv).gridTemplateColumns : '';
+        const cols = gridStyle ? gridStyle.split(' ').filter(Boolean).length : 0;
+        const links = Array.from(picker.querySelectorAll('a[href^="/shop?category="]'));
+        const firstCardTop = links[0]?.getBoundingClientRect().top;
+        const sixthCardTop = links[5]?.getBoundingClientRect().top;
+        const allSixInFirstRow = links.length >= 6 && typeof firstCardTop === 'number' && typeof sixthCardTop === 'number'
+          ? Math.abs(firstCardTop - sixthCardTop) <= 4
+          : true;
+        const subLinks = Array.from(picker.querySelectorAll('a[href*="subcategory="]'));
+        const hasViewAll = picker.textContent?.includes('View All') || false;
+        const collapseBtn = picker.querySelector('button[aria-label="Collapse categories"]');
+        const internalHeading = picker.querySelector('h3, h2, h1');
+        return {
+          isOpen: getComputedStyle(picker).display !== 'none',
+          alignsWithNavbar: Math.abs(rect.left - navRect.left) <= 4 && Math.abs(rect.right - navRect.right) <= 4,
+          width: rect.width,
+          gridCols: cols,
+          categoryCount: links.length,
+          allSixInFirstRow,
+          hasSubcategories: subLinks.length > 0,
+          hasViewAll,
+          hasCollapseButton: Boolean(collapseBtn),
+          hasInternalHeading: Boolean(internalHeading)
+        };
       })()
     `);
 
-    assert.ok(isMoreVisibleOnFocus, "More panel must be reachable and visible via keyboard focus-within");
+    assert.ok(pickerAudit.isOpen, "Desktop categories panel must open when Categories ▾ is clicked");
+    assert.strictEqual(pickerAudit.gridCols, 6, `Categories panel grid must have exactly 6 columns on desktop (got ${pickerAudit.gridCols})`);
+    assert.ok(pickerAudit.allSixInFirstRow, "First six category cards must all appear on the first row on desktop");
+    assert.ok(pickerAudit.alignsWithNavbar, `Categories panel must align to main navbar container (got ${pickerAudit.width}px)`);
+    assert.ok(pickerAudit.categoryCount > 0, "Categories panel must contain active top-level categories");
+    assert.strictEqual(pickerAudit.hasSubcategories, false, "Panel must NOT render subcategories");
+    assert.strictEqual(pickerAudit.hasViewAll, false, "Panel must NOT render View All link");
+    assert.strictEqual(pickerAudit.hasInternalHeading, false, "Panel must NOT render internal heading");
+    assert.ok(pickerAudit.hasCollapseButton, "Panel must contain bottom-center collapse control");
+
     await captureScreenshot("navbar-more-desktop-1280x800.png", 1280, 800);
 
-    // Perform ACTUAL direct category-link navigation in Chrome
+    // Verify category card hover styling: restrained ivory hover, NOT solid dark (#2e221d)
+    const cardRect = await evaluateInPage<{ x: number; y: number; width: number; height: number }>(`
+      (() => {
+        const picker = document.getElementById('desktop-category-picker');
+        const firstLink = picker?.querySelector('a[href^="/shop?category="]');
+        if (!firstLink) return { x: 0, y: 0, width: 0, height: 0 };
+        const r = firstLink.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      })()
+    `);
+
+    // Hover over the first category card
+    await sendCdp("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: Math.round(cardRect.x + cardRect.width / 2),
+      y: Math.round(cardRect.y + cardRect.height / 2),
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const hoverStyle = await evaluateInPage<{ bgColor: string; textColor: string; isSolidDark: boolean }>(`
+      (() => {
+        const picker = document.getElementById('desktop-category-picker');
+        const firstLink = picker?.querySelector('a[href^="/shop?category="]');
+        if (!firstLink) return { bgColor: '', textColor: '', isSolidDark: true };
+        const cs = window.getComputedStyle(firstLink);
+        const bg = cs.backgroundColor;
+        const isDark = bg.includes('rgb(46, 34, 29)') || bg.includes('rgb(0, 0, 0)');
+        return {
+          bgColor: bg,
+          textColor: cs.color,
+          isSolidDark: isDark
+        };
+      })()
+    `);
+
+    assert.strictEqual(hoverStyle.isSolidDark, false, `Category card hover must NOT be solid dark (got ${hoverStyle.bgColor})`);
+    assert.ok(hoverStyle.textColor.includes('rgb(46, 34, 29)'), `Category card text must remain dark brown on hover (got ${hoverStyle.textColor})`);
+
+    // Capture screenshot of category hover state
+    await captureScreenshot("navbar-category-hover-desktop-1280x800.png", 1280, 800);
+
+    // Move mouse away
+    await sendCdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: 0, y: 0 });
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Test that bottom-center collapse button closes the panel
     await evaluateInPage(`
       (() => {
-        const desktopNav = document.querySelector('header nav');
-        const skinLink = Array.from(desktopNav?.querySelectorAll('a') || [])
-          .find(a => a.textContent.trim() === 'QA Skincare');
-        if (!skinLink) throw new Error('QA Skincare link not found');
-        skinLink.click();
+        const btn = document.querySelector('button[aria-label="Collapse categories"]');
+        btn?.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 300));
+    const isClosedAfterCollapse = await evaluateInPage<boolean>(`
+      !document.getElementById('desktop-category-picker')
+    `);
+    assert.ok(isClosedAfterCollapse, "Clicking bottom-center collapse button must close categories panel");
+
+    // Re-open panel for navigation test
+    await evaluateInPage(`
+      (() => {
+        const categoriesBtn = Array.from(document.querySelectorAll('header button'))
+          .find(b => b.textContent?.includes('Categories ▾'));
+        categoriesBtn?.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Direct category navigation from compact category picker
+    await evaluateInPage(`
+      (() => {
+        const picker = document.getElementById('desktop-category-picker');
+        const catLink = Array.from(picker?.querySelectorAll('a[href^="/shop?category="]') || [])[0];
+        if (!catLink) throw new Error('Category link not found in category picker');
+        catLink.click();
       })()
     `);
 
@@ -1105,15 +1200,155 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
 
     const currentNavUrl = await evaluateInPage<string>("window.location.href");
     assert.ok(
-      currentNavUrl.includes("category=qa-skincare"),
-      "Clicking QA Skincare top-level category link must navigate to category=qa-skincare"
+      currentNavUrl.includes("category="),
+      "Clicking category link in compact picker must navigate to category URL"
     );
 
-    // Return to QA homepage for subsequent tests
+    // Verify selected 'All' chip on category page has readable white text on dark background
+    await navigateAndWait(`http://localhost:${QA_PORT}/shop?category=qa-fragrances`, 1000);
+    const allChipAudit = await evaluateInPage<{
+      found: boolean;
+      text: string;
+      color: string;
+      bgColor: string;
+    }>(`
+      (() => {
+        const chips = Array.from(document.querySelectorAll('a')).filter(a => a.href.includes('category='));
+        const allChip = chips.find(a => a.textContent?.trim() === 'All');
+        if (!allChip) return { found: false, text: '', color: '', bgColor: '' };
+        const style = window.getComputedStyle(allChip);
+        return {
+          found: true,
+          text: allChip.textContent?.trim() || '',
+          color: style.color,
+          bgColor: style.backgroundColor
+        };
+      })()
+    `);
+    assert.ok(allChipAudit.found, "Selected All chip must be found on category page");
+    assert.strictEqual(allChipAudit.text, "All", "Selected All chip must visibly display text 'All'");
+    assert.strictEqual(allChipAudit.color, "rgb(255, 255, 255)", "Selected All chip must have readable white text");
+    assert.strictEqual(allChipAudit.bgColor, "rgb(46, 34, 29)", "Selected All chip must have dark background");
+
+    // Verify dedicated /categories route in browser
+    await navigateAndWait(`http://localhost:${QA_PORT}/categories`, 1000);
+    const categoriesPageAudit = await evaluateInPage<{
+      hasHeading: boolean;
+      categoryCardCount: number;
+      hasProductGrid: boolean;
+      firstCategoryHref: string;
+    }>(`
+      (() => {
+        const heading = Array.from(document.querySelectorAll('h1')).find(h => h.textContent?.includes('Categories'));
+        const cards = Array.from(document.querySelectorAll('main a[href^="/shop?category="]'));
+        const productGrid = Boolean(document.querySelector('[data-testid="product-grid"], [data-testid="product-card"]'));
+        return {
+          hasHeading: Boolean(heading),
+          categoryCardCount: cards.length,
+          hasProductGrid: productGrid,
+          firstCategoryHref: cards[0]?.getAttribute('href') || ''
+        };
+      })()
+    `);
+    assert.ok(categoriesPageAudit.hasHeading, "/categories must render Categories heading");
+    assert.ok(categoriesPageAudit.categoryCardCount > 0, "/categories must render active category cards");
+    assert.strictEqual(categoriesPageAudit.hasProductGrid, false, "/categories must NOT render product grid");
+    assert.ok(categoriesPageAudit.firstCategoryHref.startsWith("/shop?category="), "Category cards must route to canonical shop URLs");
+
+    // Verify 1024px minimum desktop viewport panel geometry
+    await setViewport(1024, 768, true);
     await navigateAndWait(`http://localhost:${QA_PORT}`, 1000);
+    await evaluateInPage(`
+      (() => {
+        const categoriesBtn = Array.from(document.querySelectorAll('header button'))
+          .find(b => b.textContent?.includes('Categories ▾'));
+        categoriesBtn?.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 400));
+    const minDesktopAudit = await evaluateInPage<{
+      isOpen: boolean;
+      alignsWithNavbar: boolean;
+      scrollWidth: number;
+      hasHorizontalOverflow: boolean;
+    }>(`
+      (() => {
+        const picker = document.getElementById('desktop-category-picker');
+        if (!picker) return { isOpen: false, alignsWithNavbar: false, scrollWidth: document.documentElement.scrollWidth, hasHorizontalOverflow: false };
+        const rect = picker.getBoundingClientRect();
+        const navContainer = picker.parentElement;
+        const navRect = navContainer ? navContainer.getBoundingClientRect() : rect;
+        return {
+          isOpen: getComputedStyle(picker).display !== 'none',
+          alignsWithNavbar: Math.abs(rect.left - navRect.left) <= 4 && Math.abs(rect.right - navRect.right) <= 4,
+          scrollWidth: document.documentElement.scrollWidth,
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+        };
+      })()
+    `);
+    assert.ok(minDesktopAudit.isOpen, "Categories panel opens at 1024px minimum desktop width");
+    assert.ok(minDesktopAudit.alignsWithNavbar, "Categories panel aligns to navbar container at 1024px");
+    assert.strictEqual(minDesktopAudit.hasHorizontalOverflow, false, "Must produce zero horizontal overflow at 1024px");
+
+    // Return to QA homepage at 1280x800 for pushed sidebar testing
+    await setViewport(1280, 800, true);
+    await navigateAndWait(`http://localhost:${QA_PORT}`, 1000);
+
+    // Test Desktop PUSHED SIDEBAR (>= 768px layout)
+    await evaluateInPage(`
+      (() => {
+        const menuBtn = Array.from(document.querySelectorAll('header button')).find(b => b.textContent?.includes('Menu'));
+        menuBtn?.click();
+      })()
+    `);
+
+    await new Promise((r) => setTimeout(r, 400));
+
+    const desktopPushedAudit = await evaluateInPage<{
+      sidebarExists: boolean;
+      sidebarRight: number;
+      headerLeft: number;
+      minContentLeft: number;
+      contentRightOfSidebar: boolean;
+      isBackdropVisible: boolean;
+      hasHorizontalOverflow: boolean;
+    }>(`
+      (() => {
+        const sidebar = document.getElementById('storefront-menu-sidebar');
+        if (!sidebar) return { sidebarExists: false, sidebarRight: 0, headerLeft: 0, minContentLeft: 0, contentRightOfSidebar: false, isBackdropVisible: false, hasHorizontalOverflow: false };
+        const sRect = sidebar.getBoundingClientRect();
+        const header = document.querySelector('header');
+        const hLeft = header ? header.getBoundingClientRect().left : 0;
+        const sections = Array.from(document.querySelectorAll('section, main, .container-ph'));
+        const lefts = sections.map(s => s.getBoundingClientRect().left);
+        const minLeft = Math.min(...lefts);
+        const backdrop = document.querySelector('[data-testid="storefront-menu-backdrop"]');
+        const isBVisible = backdrop ? getComputedStyle(backdrop).display !== 'none' : false;
+        return {
+          sidebarExists: true,
+          sidebarRight: sRect.right,
+          headerLeft: hLeft,
+          minContentLeft: minLeft,
+          contentRightOfSidebar: minLeft >= sRect.right - 1,
+          isBackdropVisible: isBVisible,
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+        };
+      })()
+    `);
+
+    assert.ok(desktopPushedAudit.sidebarExists, "Left sidebar must open upon Menu click at 1280x800");
+    assert.ok(desktopPushedAudit.contentRightOfSidebar, "Main content must be shifted to the right of the sidebar");
+    assert.strictEqual(desktopPushedAudit.isBackdropVisible, false, "Must NOT have dark modal backdrop on desktop");
+    assert.strictEqual(desktopPushedAudit.hasHorizontalOverflow, false, "Must have no horizontal overflow when sidebar is open");
+
+    // Close sidebar via Escape
+    await evaluateInPage(`
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    `);
+    await new Promise((r) => setTimeout(r, 300));
   });
 
-  it("8. Mobile Navigation Contract: Drawer, direct category link navigation, two-control disclosure, drawer close after navigation", async () => {
+  it("8. Mobile Navigation Contract: Drawer from left, top-level categories only, direct category navigation, drawer close", async () => {
     await setViewport(375, 667, true);
     await navigateAndWait(`http://localhost:${QA_PORT}`, 1000);
 
@@ -1123,246 +1358,247 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
     `);
     await new Promise((r) => setTimeout(r, 400));
 
-    const drawerOpenMobile = await evaluateInPage<boolean>(`
-      Boolean(document.querySelector('aside')?.textContent?.includes('All Products'))
-    `);
-    assert.ok(drawerOpenMobile, "Mobile hamburger click must open navigation drawer");
-
-    // A. Verify direct category Link exists & B. Verify separate disclosure button exists & C. Before disclosure: aria-expanded=false
-    const disclosureAudit = await evaluateInPage<{
+    const drawerAudit = await evaluateInPage<{
+      isOpen: boolean;
+      hasShop: boolean;
+      hasPureHavenBrand: boolean;
+      hasCategoriesHeading: boolean;
+      hasAllCategoriesLink: boolean;
+      allCategoriesText: string;
+      categoryCount: number;
+      categoryLinks: string[];
+      hasSubcategoryAccordions: boolean;
       hasDirectCategoryLink: boolean;
-      categoryHref: string;
-      hasDisclosureButton: boolean;
-      initialExpanded: boolean;
-      ariaControls: string;
-      hasZeroSubDisclosure: boolean;
+      firstCategoryHref: string;
+      hasBackdrop: boolean;
+      backdropFilter: string;
+      hasHorizontalOverflow: boolean;
     }>(`
       (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-
-        const catLink = fragRow?.querySelector('a[href^="/shop?category="]');
-        const discBtn = fragRow?.querySelector('button[aria-controls]');
-
-        const skinRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Skincare'));
-        const skinDiscBtn = skinRow?.querySelector('button[aria-controls]');
-
+        const sidebar = document.getElementById('storefront-menu-sidebar');
+        if (!sidebar) return { isOpen: false, hasShop: false, hasPureHavenBrand: false, hasCategoriesHeading: false, hasAllCategoriesLink: false, allCategoriesText: '', categoryCount: 0, categoryLinks: [], hasSubcategoryAccordions: false, hasDirectCategoryLink: false, firstCategoryHref: '', hasBackdrop: false, backdropFilter: '', hasHorizontalOverflow: false };
+        const allCatLink = sidebar.querySelector('a[href="/categories"]');
+        const categoriesHeading = Array.from(sidebar.querySelectorAll('span')).find(s => s.textContent?.trim() === 'Categories');
+        const catLinks = Array.from(sidebar.querySelectorAll('a[href^="/shop?category="]'));
+        const firstCatLink = catLinks[0];
+        const hasAccordions = Boolean(sidebar.querySelector('button[aria-controls], svg.rotate-90'));
+        const backdrop = document.querySelector('[data-testid="storefront-menu-backdrop"]');
+        const bFilter = backdrop ? getComputedStyle(backdrop).backdropFilter : '';
         return {
-          hasDirectCategoryLink: Boolean(catLink),
-          categoryHref: catLink?.getAttribute('href') || '',
-          hasDisclosureButton: Boolean(discBtn),
-          initialExpanded: discBtn?.getAttribute('aria-expanded') === 'true',
-          ariaControls: discBtn?.getAttribute('aria-controls') || '',
-          hasZeroSubDisclosure: Boolean(skinDiscBtn)
+          isOpen: getComputedStyle(sidebar).display !== 'none',
+          hasShop: Boolean(sidebar.querySelector('a[href="/shop"]')),
+          hasPureHavenBrand: sidebar.textContent?.includes('PURE HAVEN BD') || false,
+          hasCategoriesHeading: Boolean(categoriesHeading),
+          hasAllCategoriesLink: Boolean(allCatLink),
+          allCategoriesText: allCatLink?.textContent?.replace(/\\s+/g, ' ').trim() || '',
+          categoryCount: catLinks.length,
+          categoryLinks: catLinks.map(a => a.textContent?.trim() || ''),
+          hasSubcategoryAccordions: hasAccordions,
+          hasDirectCategoryLink: Boolean(firstCatLink),
+          firstCategoryHref: firstCatLink?.getAttribute('href') || '',
+          hasBackdrop: Boolean(backdrop),
+          backdropFilter: bFilter,
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
         };
       })()
     `);
 
-    assert.ok(disclosureAudit.hasDirectCategoryLink, "Direct category link must exist in mobile drawer");
-    assert.ok(disclosureAudit.categoryHref.includes("qa-fragrances"), "Category link navigates to canonical category");
-    assert.ok(disclosureAudit.hasDisclosureButton, "Separate disclosure button must exist for category with subcategories");
-    assert.strictEqual(disclosureAudit.initialExpanded, false, "Initial aria-expanded must be false before disclosure click");
-    assert.ok(!disclosureAudit.hasZeroSubDisclosure, "Zero-subcategory category must NOT have disclosure button");
-
-    // D. Click disclosure: URL unchanged, aria-expanded=true, aria-controls non-empty, controlled container exists
-    const urlBeforeDisclosure = await evaluateInPage<string>("window.location.href");
-    await evaluateInPage(`
-      (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        fragRow?.querySelector('button[aria-controls]')?.click();
-      })()
-    `);
-    await new Promise((r) => setTimeout(r, 300));
-
-    const urlAfterDisclosure = await evaluateInPage<string>("window.location.href");
-    assert.strictEqual(urlBeforeDisclosure, urlAfterDisclosure, "Clicking disclosure button must NOT change the URL");
-
-    const disclosureState = await evaluateInPage<{
-      expanded: boolean;
-      controlsId: string;
-      controlsExist: boolean;
-      hasExpectedSubcategories: boolean;
-    }>(`
-      (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        const discBtn = fragRow?.querySelector('button[aria-controls]');
-        const expanded = discBtn?.getAttribute('aria-expanded') === 'true';
-        const controlsId = discBtn?.getAttribute('aria-controls') || '';
-        const container = controlsId ? document.getElementById(controlsId) : null;
-        const subLinks = container ? Array.from(container.querySelectorAll('a')).map(a => a.getAttribute('href') || '') : [];
-        const hasExpectedSub = subLinks.some(h => h.includes('qa-perfume-oil'));
-        return {
-          expanded,
-          controlsId,
-          controlsExist: Boolean(container),
-          hasExpectedSubcategories: hasExpectedSub
-        };
-      })()
-    `);
-
-    assert.ok(disclosureState.expanded, "aria-expanded must toggle to true after first click");
-    assert.ok(disclosureState.controlsId.length > 0, "aria-controls attribute must be non-empty");
-    assert.ok(disclosureState.controlsExist, "Controlled container matching aria-controls must exist in DOM");
-    assert.ok(disclosureState.hasExpectedSubcategories, "Controlled container must contain expected active subcategories");
+    assert.ok(drawerAudit.isOpen, "Mobile hamburger click must open navigation drawer");
+    assert.ok(drawerAudit.hasShop, "Mobile drawer must contain Shop link");
+    assert.ok(drawerAudit.hasPureHavenBrand, "Mobile drawer must display PURE HAVEN BD");
+    assert.ok(drawerAudit.hasCategoriesHeading, "Mobile drawer must contain Categories section heading");
+    assert.ok(drawerAudit.hasAllCategoriesLink, "Mobile drawer must contain clickable All → link to /categories");
+    assert.ok(drawerAudit.allCategoriesText.includes("All"), "All link must display 'All'");
+    assert.ok(drawerAudit.allCategoriesText.includes("→"), "All link must contain right-arrow icon '→'");
+    assert.ok(drawerAudit.categoryCount > 0, "Mobile drawer must contain top-level category links");
+    assert.ok(drawerAudit.hasDirectCategoryLink, "Mobile drawer must contain direct category link");
+    assert.ok(drawerAudit.firstCategoryHref.includes("category="), "Category link navigates directly to canonical category");
+    assert.strictEqual(drawerAudit.hasSubcategoryAccordions, false, "Mobile drawer must NOT contain nested subcategory accordions");
+    assert.strictEqual(drawerAudit.hasHorizontalOverflow, false, "Must have no horizontal page overflow on mobile");
 
     await captureScreenshot("navbar-drawer-mobile-375x667.png", 375, 667);
 
-    // E. Click disclosure AGAIN: aria-expanded=false, controlled container closes
+    // Click direct category link: navigates to /shop?category=... and closes drawer
     await evaluateInPage(`
       (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        fragRow?.querySelector('button[aria-controls]')?.click();
-      })()
-    `);
-    await new Promise((r) => setTimeout(r, 300));
-
-    const secondClickState = await evaluateInPage<{
-      expanded: boolean;
-      containerVisible: boolean;
-    }>(`
-      (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        const discBtn = fragRow?.querySelector('button[aria-controls]');
-        const controlsId = discBtn?.getAttribute('aria-controls') || '';
-        const container = controlsId ? document.getElementById(controlsId) : null;
-        return {
-          expanded: discBtn?.getAttribute('aria-expanded') === 'true',
-          containerVisible: Boolean(container && getComputedStyle(container).display !== 'none')
-        };
+        const sidebar = document.getElementById('storefront-menu-sidebar');
+        const firstCatLink = Array.from(sidebar?.querySelectorAll('a[href^="/shop?category="]') || [])[0];
+        firstCatLink?.click();
       })()
     `);
 
-    assert.strictEqual(secondClickState.expanded, false, "aria-expanded must be false after second click");
-    assert.strictEqual(secondClickState.containerVisible, false, "Controlled container must close after second click");
-
-    // F. Click the DIRECT category Link itself: navigates to /shop?category=qa-fragrances and closes drawer
-    await evaluateInPage(`
-      (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        const catLink = fragRow?.querySelector('a[href^="/shop?category="]');
-        catLink?.click();
-      })()
-    `);
     await new Promise((r) => setTimeout(r, 1200));
 
     const postDirectNavUrl = await evaluateInPage<string>("window.location.href");
     assert.ok(
-      postDirectNavUrl.includes("/shop?category=qa-fragrances"),
-      "Direct category link must navigate to /shop?category=qa-fragrances"
+      postDirectNavUrl.includes("category="),
+      "Direct category link must navigate to category page"
     );
 
     const drawerClosedAfterNav = await evaluateInPage<boolean>(`
-      Boolean(!document.querySelector('aside'))
+      Boolean(!document.getElementById('storefront-menu-sidebar'))
     `);
     assert.ok(drawerClosedAfterNav, "Drawer must be closed after direct category link navigation");
   });
 
-  it("9. Tablet Two-Control Contract: Hamburger, no dead zone, separate Link and disclosure", async () => {
-    // Exact 768x1024 tablet viewport
+  it("9. Tablet Pushed Sidebar Contract: Menu opens from left, pushes content right, website visible, no dark overlay", async () => {
     await setViewport(768, 1024, true);
     await navigateAndWait(`http://localhost:${QA_PORT}`, 1000);
 
     const tabletNavState = await evaluateInPage<{
-      hamburgerVisible: boolean;
-      desktopNavHidden: boolean;
+      menuBtnVisible: boolean;
+      contactVisible: boolean;
     }>(`
       (() => {
         const header = document.querySelector('header');
-        const hamburger = header?.querySelector('button[aria-label="Open menu"]');
-        const desktopNav = header?.querySelector('nav');
+        const menuBtn = header?.querySelector('button[aria-label="Open menu"]');
+        const contactLinks = Array.from(header?.querySelectorAll('a[href="/contact"]') || []);
+        const contactVisible = contactLinks.some(a => getComputedStyle(a).display !== 'none');
         return {
-          hamburgerVisible: Boolean(hamburger && getComputedStyle(hamburger).display !== 'none'),
-          desktopNavHidden: Boolean(!desktopNav || getComputedStyle(desktopNav).display === 'none')
+          menuBtnVisible: Boolean(menuBtn && getComputedStyle(menuBtn).display !== 'none'),
+          contactVisible
         };
       })()
     `);
 
-    assert.ok(tabletNavState.hamburgerVisible, "Hamburger button must remain active on tablet (768px)");
-    assert.ok(tabletNavState.desktopNavHidden, "Desktop horizontal nav must remain hidden on tablet (768px)");
+    assert.ok(tabletNavState.menuBtnVisible, "Menu button must remain active on tablet (768px)");
+    assert.ok(tabletNavState.contactVisible, "Contact link must be visible on tablet (768px)");
 
-    // Open drawer on tablet
+    // Open sidebar on tablet
     await evaluateInPage(`
       document.querySelector('button[aria-label="Open menu"]')?.click();
     `);
     await new Promise((r) => setTimeout(r, 400));
 
-    // Verify direct Link + disclosure button on tablet
-    const tabletDrawerAudit = await evaluateInPage<{
-      hasDirectLink: boolean;
-      hasDisclosure: boolean;
-      initialExpanded: boolean;
+    const tabletSidebarAudit = await evaluateInPage<{
+      sidebarExists: boolean;
+      sidebarWidth: number;
+      sidebarRight: number;
+      minContentLeft: number;
+      contentRightOfSidebar: boolean;
+      bodyPaddingLeft: string;
+      isBackdropVisible: boolean;
+      hasHorizontalOverflow: boolean;
+      categoryLinks: string[];
+      hasSubcategoryAccordions: boolean;
     }>(`
       (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        const catLink = fragRow?.querySelector('a[href^="/shop?category="]');
-        const discBtn = fragRow?.querySelector('button[aria-controls]');
+        const sidebar = document.getElementById('storefront-menu-sidebar');
+        if (!sidebar) return { sidebarExists: false, sidebarWidth: 0, sidebarRight: 0, minContentLeft: 0, contentRightOfSidebar: false, bodyPaddingLeft: '', isBackdropVisible: false, hasHorizontalOverflow: false, categoryLinks: [], hasSubcategoryAccordions: false };
+        const sRect = sidebar.getBoundingClientRect();
+        const sections = Array.from(document.querySelectorAll('section, main, .container-ph'));
+        const lefts = sections.map(s => s.getBoundingClientRect().left);
+        const minLeft = Math.min(...lefts);
+        const backdrop = document.querySelector('[data-testid="storefront-menu-backdrop"]');
+        const isBVisible = backdrop ? getComputedStyle(backdrop).display !== 'none' : false;
+        const catLinks = Array.from(sidebar.querySelectorAll('a[href^="/shop?category="]'));
+        const hasAccordions = Boolean(sidebar.querySelector('button[aria-controls], svg.rotate-90'));
         return {
-          hasDirectLink: Boolean(catLink),
-          hasDisclosure: Boolean(discBtn),
-          initialExpanded: discBtn?.getAttribute('aria-expanded') === 'true'
+          sidebarExists: true,
+          sidebarWidth: sRect.width,
+          sidebarRight: sRect.right,
+          minContentLeft: minLeft,
+          contentRightOfSidebar: minLeft >= sRect.right - 1,
+          bodyPaddingLeft: getComputedStyle(document.body).paddingLeft,
+          isBackdropVisible: isBVisible,
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+          categoryLinks: catLinks.map(a => a.textContent?.trim() || ''),
+          hasSubcategoryAccordions: hasAccordions
         };
       })()
     `);
 
-    assert.ok(tabletDrawerAudit.hasDirectLink, "Tablet drawer must have direct category Link");
-    assert.ok(tabletDrawerAudit.hasDisclosure, "Tablet drawer must have separate disclosure button");
-    assert.strictEqual(tabletDrawerAudit.initialExpanded, false, "Initial aria-expanded is false on tablet");
+    assert.ok(tabletSidebarAudit.sidebarExists, "Tablet sidebar must open upon Menu click");
+    assert.ok(tabletSidebarAudit.sidebarWidth <= 300, `Sidebar width must be bounded (got ${tabletSidebarAudit.sidebarWidth}px)`);
+    assert.ok(tabletSidebarAudit.contentRightOfSidebar, "Main content must be shifted to the right of the sidebar on tablet");
+    assert.strictEqual(tabletSidebarAudit.isBackdropVisible, false, "Must NOT have dark modal backdrop on tablet");
+    assert.strictEqual(tabletSidebarAudit.hasHorizontalOverflow, false, "Must have zero horizontal page overflow on tablet");
+    assert.ok(tabletSidebarAudit.categoryLinks.length > 0, "Tablet sidebar must contain top-level category links");
+    assert.strictEqual(tabletSidebarAudit.hasSubcategoryAccordions, false, "Tablet sidebar must NOT contain nested subcategory accordions");
 
-    // Click disclosure on tablet
-    const urlBefore = await evaluateInPage<string>("window.location.href");
-    await evaluateInPage(`
-      (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        fragRow?.querySelector('button[aria-controls]')?.click();
-      })()
-    `);
-    await new Promise((r) => setTimeout(r, 300));
-
-    const urlAfter = await evaluateInPage<string>("window.location.href");
-    assert.strictEqual(urlBefore, urlAfter, "Tablet disclosure click must NOT change URL");
-
-    const tabletExpandedState = await evaluateInPage<{
-      expanded: boolean;
-      hasControlsContainer: boolean;
-    }>(`
-      (() => {
-        const aside = document.querySelector('aside');
-        const fragRow = Array.from(aside?.querySelectorAll('div.border-b') || [])
-          .find(d => d.textContent.includes('QA Fragrances'));
-        const discBtn = fragRow?.querySelector('button[aria-controls]');
-        const controlsId = discBtn?.getAttribute('aria-controls') || '';
-        const container = controlsId ? document.getElementById(controlsId) : null;
-        return {
-          expanded: discBtn?.getAttribute('aria-expanded') === 'true',
-          hasControlsContainer: Boolean(container)
-        };
-      })()
-    `);
-
-    assert.ok(tabletExpandedState.expanded, "Tablet disclosure toggles aria-expanded to true");
-    assert.ok(tabletExpandedState.hasControlsContainer, "Tablet disclosure reveals matching subcategory container");
-
-    // Close drawer
+    // Close sidebar via Close button
     await evaluateInPage(`
       document.querySelector('button[aria-label="Close menu"]')?.click();
     `);
     await new Promise((r) => setTimeout(r, 300));
+
+    const sidebarClosed = await evaluateInPage<boolean>(`
+      Boolean(!document.getElementById('storefront-menu-sidebar'))
+    `);
+    assert.ok(sidebarClosed, "Sidebar must close when Close button is clicked");
+
+    // Verify Tablet Navbar Categories Panel (768x1024)
+    // 1. Open Categories ▾ on tablet
+    await evaluateInPage(`
+      (() => {
+        const categoriesBtn = Array.from(document.querySelectorAll('header button'))
+          .find(b => b.textContent?.includes('Categories ▾'));
+        categoriesBtn?.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 400));
+
+    const tabletPickerAudit = await evaluateInPage<{
+      isOpen: boolean;
+      alignsWithNavbar: boolean;
+      width: number;
+      gridCols: number;
+      categoryCount: number;
+      hasSubcategories: boolean;
+      hasCollapseButton: boolean;
+      hasInternalHeading: boolean;
+      hasHorizontalOverflow: boolean;
+    }>(`
+      (() => {
+        const picker = document.getElementById('desktop-category-picker');
+        if (!picker) return { isOpen: false, alignsWithNavbar: false, width: 0, gridCols: 0, categoryCount: 0, hasSubcategories: false, hasCollapseButton: false, hasInternalHeading: false, hasHorizontalOverflow: false };
+        const rect = picker.getBoundingClientRect();
+        const navContainer = picker.parentElement;
+        const navRect = navContainer ? navContainer.getBoundingClientRect() : rect;
+        const gridDiv = picker.querySelector('.grid');
+        const gridStyle = gridDiv ? window.getComputedStyle(gridDiv).gridTemplateColumns : '';
+        const cols = gridStyle ? gridStyle.split(' ').filter(Boolean).length : 0;
+        const links = Array.from(picker.querySelectorAll('a[href^="/shop?category="]'));
+        const subLinks = Array.from(picker.querySelectorAll('a[href*="subcategory="]'));
+        const collapseBtn = picker.querySelector('button[aria-label="Collapse categories"]');
+        const internalHeading = picker.querySelector('h3, h2, h1');
+        return {
+          isOpen: getComputedStyle(picker).display !== 'none',
+          alignsWithNavbar: Math.abs(rect.left - navRect.left) <= 4 && Math.abs(rect.right - navRect.right) <= 4,
+          width: rect.width,
+          gridCols: cols,
+          categoryCount: links.length,
+          hasSubcategories: subLinks.length > 0,
+          hasCollapseButton: Boolean(collapseBtn),
+          hasInternalHeading: Boolean(internalHeading),
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+        };
+      })()
+    `);
+
+    assert.ok(tabletPickerAudit.isOpen, "Categories panel must open and be visible on tablet (768x1024)");
+    assert.strictEqual(tabletPickerAudit.gridCols, 4, `Categories panel grid must have 4 columns on tablet (got ${tabletPickerAudit.gridCols})`);
+    assert.ok(tabletPickerAudit.alignsWithNavbar, `Categories panel must align to main navbar container on tablet (got ${tabletPickerAudit.width}px)`);
+    assert.strictEqual(tabletPickerAudit.hasHorizontalOverflow, false, "Must produce zero horizontal overflow on tablet when Categories panel is open");
+    assert.ok(tabletPickerAudit.categoryCount > 0, "Categories panel must contain active top-level categories on tablet");
+    assert.strictEqual(tabletPickerAudit.hasSubcategories, false, "Categories panel must NOT render subcategories on tablet");
+    assert.strictEqual(tabletPickerAudit.hasInternalHeading, false, "Categories panel must NOT render internal heading");
+    assert.ok(tabletPickerAudit.hasCollapseButton, "Categories panel must contain bottom-center collapse control on tablet");
+
+    await captureScreenshot("navbar-categories-tablet-768x1024.png", 768, 1024);
+
+    // Test that bottom-center collapse button closes the panel on tablet
+    await evaluateInPage(`
+      (() => {
+        const btn = document.querySelector('button[aria-label="Collapse categories"]');
+        btn?.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 300));
+    const isClosedAfterCollapseTablet = await evaluateInPage<boolean>(`
+      !document.getElementById('desktop-category-picker')
+    `);
+    assert.ok(isClosedAfterCollapseTablet, "Clicking bottom-center collapse button must close categories panel on tablet");
   });
 
   it("10. SafeMobileBottomNav: Real-browser mobile bottom navigation presentation and menu usability", async () => {
@@ -1386,7 +1622,7 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
         const menuBtn = Array.from(nav.querySelectorAll('button')).find(b => b.textContent.includes('MENU'));
         const cart = nav.querySelector('a[href="/cart"]');
         const search = nav.querySelector('a[href*="focus=search"]');
-        const account = nav.querySelector('a[href="/login"]');
+        const account = Array.from(nav.querySelectorAll('a')).find(a => a.textContent.includes('ACCOUNT'));
 
         const rect = nav.getBoundingClientRect();
         const visible = getComputedStyle(nav).display !== 'none' && rect.height > 0;
@@ -1409,7 +1645,14 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
     assert.ok(bottomNavAudit.hasMenuButton, "MENU button exists in bottom nav");
     assert.strictEqual(bottomNavAudit.cartHref, "/cart", "CART link points to '/cart'");
     assert.ok(bottomNavAudit.searchHref.includes("/shop?focus=search"), "SEARCH link points to '/shop?focus=search'");
-    assert.strictEqual(bottomNavAudit.accountHref, "/login", "ACCOUNT link points to '/login'");
+    assert.strictEqual(bottomNavAudit.accountHref, "/user-login", "ACCOUNT link points to '/user-login' when unauthenticated");
+
+    // Verify auth-aware dynamic destination contract: authenticated users route to /customer/dashboard
+    const bottomNavSource = fs.readFileSync(path.join(process.cwd(), "components", "layout", "SafeMobileBottomNav.tsx"), "utf8");
+    assert.ok(
+      bottomNavSource.includes('isLoggedIn ? "/customer/dashboard" : "/user-login"'),
+      "SafeMobileBottomNav must dynamically route to /customer/dashboard when authenticated"
+    );
 
     // Click MENU button to verify bottom-nav menu overlay opens
     await evaluateInPage(`
@@ -1422,7 +1665,7 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
     await new Promise((r) => setTimeout(r, 400));
 
     const menuOpen = await evaluateInPage<boolean>(`
-      Boolean(document.querySelector('aside')?.textContent?.includes('All Products'))
+      Boolean(document.querySelector('aside')?.textContent?.includes('Shop'))
     `);
     assert.ok(menuOpen, "Bottom nav MENU button opens bottom-nav category menu overlay");
 

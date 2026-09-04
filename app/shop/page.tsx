@@ -3,7 +3,6 @@ import TopBar from "@/components/layout/TopBar";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import ProgressiveProductGrid from "@/components/shop/ProgressiveProductGrid";
-import SafeImage from "@/components/ui/SafeImage";
 import { getCachedCategoryRows } from "@/lib/catalogRead";
 import { parsePublicCatalogParams } from "@/lib/catalog/queryParams";
 import { getPublicCatalogQuery } from "@/lib/catalog/publicCatalogQuery";
@@ -115,19 +114,59 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
       <Navbar />
 
       <section className="container-ph section-gap">
+        {/* Breadcrumb */}
+        {activeCategory ? (
+          <nav aria-label="Breadcrumb" className="mb-4">
+            <ol className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
+              <li>
+                <Link href="/" className="hover:text-[#7a5244] transition">
+                  Home
+                </Link>
+              </li>
+              <li aria-hidden="true">/</li>
+              <li>
+                <Link href="/shop" className="hover:text-[#7a5244] transition">
+                  Shop
+                </Link>
+              </li>
+              <li aria-hidden="true">/</li>
+              {activeSubcategory ? (
+                <>
+                  <li>
+                    <Link
+                      href={shopHref({ category: activeCategory.slug, sort, q: query })}
+                      className="hover:text-[#7a5244] transition"
+                    >
+                      {activeCategory.name}
+                    </Link>
+                  </li>
+                  <li aria-hidden="true">/</li>
+                  <li className="font-semibold text-[#2e221d]" aria-current="page">
+                    {activeSubcategory.name}
+                  </li>
+                </>
+              ) : (
+                <li className="font-semibold text-[#2e221d]" aria-current="page">
+                  {activeCategory.name}
+                </li>
+              )}
+            </ol>
+          </nav>
+        ) : null}
+
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.22em] text-[#7a5244]">
-              Browse Products
+            <p className="text-xs sm:text-sm uppercase tracking-[0.22em] text-[#7a5244]">
+              {activeCategory ? "Category Catalog" : "Browse Products"}
             </p>
 
-            <h1 className="mt-2 text-3xl font-semibold text-[#2e221d]">
-              {activeTitle}
+            <h1 className="mt-2 text-2xl sm:text-3xl font-semibold text-[#2e221d]">
+              {activeCategory ? activeCategory.name.toUpperCase() : activeTitle}
             </h1>
 
             {activeCategory && activeSubcategory ? (
               <p className="mt-2 text-sm text-neutral-600">
-                Showing products from {activeCategory.name} category under{" "}
+                Showing products from {activeCategory.name} under{" "}
                 {activeSubcategory.name}.
               </p>
             ) : null}
@@ -197,41 +236,42 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
           </div>
         </div>
 
-        {activeCategory && !subcategory && subcategories.length > 0 ? (
-          <div className="mb-10">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-2xl font-semibold text-[#2e221d]">
-                Shop by Subcategory
-              </h2>
-            </div>
+        {/* Subcategory Chip Bar (Approved Pre-Phase-6 UX) */}
+        {activeCategory && subcategories.length > 0 ? (
+          <div className="mb-8">
+            <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap">
+              <Link
+                href={shopHref({ category: activeCategory.slug, sort, q: query })}
+                className={`whitespace-nowrap rounded-full px-4 py-2 text-xs sm:text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a5244] ${
+                  !subcategory
+                    ? "bg-[#2e221d] !text-white shadow-xs"
+                    : "border border-[#ead9d1] bg-white text-[#2e221d] hover:bg-[#f8f3ef] hover:text-[#7a5244]"
+                }`}
+              >
+                All
+              </Link>
 
-            <div className="flex gap-5 overflow-x-auto pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {subcategories.map((item) => (
-                <Link
-                  key={item.slug}
-                  href={`/shop?category=${category}&subcategory=${item.slug}`}
-                  className="relative h-[300px] w-[260px] shrink-0 overflow-hidden rounded-none border border-[#ead9d1] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                >
-                  <SafeImage
-                    src={item.image}
-                    alt={item.title}
-                    category={category}
-                    fallbackSrc={categoryImage}
-                    className="h-full w-full object-cover"
-                  />
-
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-
-                  <div className="absolute bottom-5 left-5 text-white">
-                    <p className="text-xs uppercase tracking-[0.2em]">
-                      Subcategory
-                    </p>
-                    <h3 className="mt-1 text-2xl font-semibold">
-                      {item.title}
-                    </h3>
-                  </div>
-                </Link>
-              ))}
+              {subcategories.map((item) => {
+                const isSelected = subcategory === item.slug;
+                return (
+                  <Link
+                    key={item.slug}
+                    href={shopHref({
+                      category: activeCategory.slug,
+                      subcategory: item.slug,
+                      sort,
+                      q: query,
+                    })}
+                    className={`whitespace-nowrap rounded-full px-4 py-2 text-xs sm:text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a5244] ${
+                      isSelected
+                        ? "bg-[#2e221d] !text-white shadow-xs"
+                        : "border border-[#ead9d1] bg-white text-[#2e221d] hover:bg-[#f8f3ef] hover:text-[#7a5244]"
+                    }`}
+                  >
+                    {item.title}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         ) : null}

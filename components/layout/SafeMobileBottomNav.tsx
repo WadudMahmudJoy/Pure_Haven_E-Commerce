@@ -1,4 +1,5 @@
-﻿"use client";
+/* eslint-disable @next/next/no-html-link-for-pages */
+"use client";
 
 import { useEffect, useState } from "react";
 
@@ -68,21 +69,31 @@ function AccountIcon() {
 export default function SafeMobileBottomNav() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [openCategory, setOpenCategory] = useState("");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/customer-auth/session", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.authenticated) {
+          setIsLoggedIn(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function loadCategories() {
       try {
-        const res = await fetch("/api/categories", { cache: "no-store" });
+        const res = await fetch("/api/categories");
         const data = await res.json();
-
-        if (res.ok && data?.success && Array.isArray(data.categories)) {
+        if (data?.success && Array.isArray(data.categories)) {
           setCategories(
-            data.categories.map((item: any) => ({
+            data.categories.map((item: { id: number | string; name: string; slug: string; subcategories?: unknown[]; subCategories?: unknown[] }) => ({
               id: item.id,
               name: item.name,
               slug: item.slug,
-              subcategories: item.subcategories || item.subCategories || [],
+              subcategories: (item.subcategories || item.subCategories || []) as Category["subcategories"],
             }))
           );
         }
@@ -96,8 +107,9 @@ export default function SafeMobileBottomNav() {
 
   function closeMenu() {
     setMenuOpen(false);
-    setOpenCategory("");
   }
+
+  const accountHref = isLoggedIn ? "/customer/dashboard" : "/user-login";
 
   return (
     <>
@@ -126,7 +138,7 @@ export default function SafeMobileBottomNav() {
           <span className="ph-real-bottom-nav-label">SEARCH</span>
         </a>
 
-        <a href="/login" className="ph-real-bottom-nav-item">
+        <a href={accountHref} className="ph-real-bottom-nav-item">
           <span className="ph-real-bottom-nav-icon"><AccountIcon /></span>
           <span className="ph-real-bottom-nav-label">ACCOUNT</span>
         </a>
@@ -143,7 +155,7 @@ export default function SafeMobileBottomNav() {
             </button>
 
             <a
-              href="/login"
+              href={accountHref}
               onClick={closeMenu}
               className="mb-7 flex items-center gap-5 rounded-2xl bg-orange-500 p-5 text-white"
             >
@@ -152,66 +164,27 @@ export default function SafeMobileBottomNav() {
               </div>
               <div>
                 <div className="text-2xl font-semibold leading-tight">
-                  Hello<br />there!
+                  {isLoggedIn ? <>Welcome<br />Back!</> : <>Hello<br />there!</>}
                 </div>
-                <div className="mt-1 text-base">Signin</div>
+                <div className="mt-1 text-base">{isLoggedIn ? "My Account" : "Signin"}</div>
               </div>
             </a>
 
             <div className="rounded-xl bg-[#f3f3f3] p-4">
-              <a href="/shop" onClick={closeMenu} className="block border-b border-neutral-300 py-3">
-                All Products
+              <a href="/shop" onClick={closeMenu} className="block border-b border-neutral-300 py-3 font-semibold text-[#2e221d] hover:text-[#7a5244]">
+                Shop
               </a>
 
-              {categories.map((category) => {
-                const hasSub = (category.subcategories || []).length > 0;
-                const active = openCategory === category.slug;
-
-                return (
-                  <div key={category.id} className="border-b border-neutral-300">
-                    <div className="flex items-center justify-between">
-                      <a
-                        href={`/shop?category=${encodeURIComponent(category.slug)}`}
-                        onClick={(e) => {
-                          if (hasSub) {
-                            e.preventDefault();
-                            setOpenCategory(active ? "" : category.slug);
-                          } else {
-                            closeMenu();
-                          }
-                        }}
-                        className="flex-1 py-3"
-                      >
-                        {category.name}
-                      </a>
-
-                      {hasSub ? (
-                        <button
-                          type="button"
-                          onClick={() => setOpenCategory(active ? "" : category.slug)}
-                          className="px-3 py-3 text-2xl text-neutral-500"
-                        >
-                          ›
-                        </button>
-                      ) : null}
-                    </div>
-
-                    {hasSub && active ? (
-                      <div className="grid gap-2 pb-3 pl-4 text-sm text-neutral-600">
-                        {category.subcategories?.map((sub) => (
-                          <a
-                            key={sub.id}
-                            href={`/shop?category=${encodeURIComponent(category.slug)}&subcategory=${encodeURIComponent(sub.slug)}`}
-                            onClick={closeMenu}
-                          >
-                            {sub.name}
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
+              {categories.map((category) => (
+                <a
+                  key={category.id}
+                  href={`/shop?category=${encodeURIComponent(category.slug)}`}
+                  onClick={closeMenu}
+                  className="block border-b border-neutral-300 py-3 text-[#2e221d] hover:text-[#7a5244]"
+                >
+                  {category.name}
+                </a>
+              ))}
             </div>
           </aside>
         </div>

@@ -669,61 +669,22 @@ a[href^="/shop?category="]:has(img) img {
   }
 }
 
-/* Mobile navbar clean responsive fix */
-@media (max-width: 767px) {
-  header .container-ph > div {
-    display: grid !important;
-    grid-template-columns: 52px 1fr auto !important;
-    gap: 10px !important;
-    align-items: center !important;
-    padding-top: 14px !important;
-    padding-bottom: 14px !important;
+/* Storefront Left Pushed Sidebar (>= 768px tablet & desktop) */
+@media (min-width: 768px) {
+  body.ph-menu-open {
+    padding-left: 260px !important;
+    transition: padding-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
+}
 
-  header a[href="/"] {
-    min-width: 0 !important;
-    white-space: nowrap !important;
+@media (min-width: 1024px) {
+  body.ph-menu-open {
+    padding-left: 280px !important;
   }
+}
 
-  header a[href="/"] > div:first-child {
-    font-size: 28px !important;
-    letter-spacing: 0.28em !important;
-    white-space: nowrap !important;
-    line-height: 1 !important;
-  }
-
-  header a[href="/"] > div:last-child {
-    font-size: 10px !important;
-    letter-spacing: 0.32em !important;
-    white-space: nowrap !important;
-  }
-
-  header .container-ph > div > div:last-child {
-    display: flex !important;
-    gap: 8px !important;
-  }
-
-  header .container-ph > div > div:last-child > a[href="/wishlist"],
-  header .container-ph > div > div:last-child > a[href="/login"] {
-    display: none !important;
-  }
-
-  header button,
-  header a {
-    min-width: 48px !important;
-  }
-
-  header .container-ph {
-    padding-left: 14px !important;
-    padding-right: 14px !important;
-  }
-
-  .floating-cart-summary,
-  [class*="FloatingCart"],
-  aside[aria-label*="cart"],
-  div:has(> div > svg):has(+ div) {
-    max-width: 92px !important;
-  }
+body.ph-hide-customer-chrome.ph-menu-open {
+  padding-left: 0 !important;
 }
 
 /* Fix bottom mobile nav layout after icon change */

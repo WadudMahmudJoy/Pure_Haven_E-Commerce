@@ -202,7 +202,7 @@ export default function Footer({
         <div className="mt-10 flex flex-col gap-4 border-t border-white/10 pt-6 text-sm text-white/55 md:flex-row md:items-center md:justify-between">
           <p>© {new Date().getFullYear()} {settings.copyright}</p>
 
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             {policyLinks.map((item) => (
               <Link
                 key={`${item.label}-${item.href}`}
@@ -212,6 +212,13 @@ export default function Footer({
                 {item.label}
               </Link>
             ))}
+            <span className="text-white/20" aria-hidden="true">·</span>
+            <Link
+              href="/admin/login"
+              className="text-white/35 transition hover:text-white/75"
+            >
+              Admin Login
+            </Link>
           </div>
         </div>
       </div>

@@ -1,7 +1,8 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type SiteSettings = {
   siteName?: string;
@@ -29,30 +30,6 @@ function normalizeImagePath(value?: string | null) {
   return `/uploads/products/${src}`;
 }
 
-function splitBrandName(value: string) {
-  const clean = value.trim() || "PURE HAVEN BD";
-  const words = clean.split(/\s+/);
-
-  if (words.length >= 3) {
-    return {
-      top: words[0],
-      bottom: words.slice(1).join(" "),
-    };
-  }
-
-  if (words.length === 2) {
-    return {
-      top: words[0],
-      bottom: words[1],
-    };
-  }
-
-  return {
-    top: clean,
-    bottom: "HAVEN BD",
-  };
-}
-
 export default function SiteBrand() {
   const [settings, setSettings] = useState<SiteSettings | null>(null);
 
@@ -61,17 +38,14 @@ export default function SiteBrand() {
 
     async function loadSettings() {
       try {
-        const res = await fetch("/api/site-settings", { cache: "force-cache" });
-        if (!res.ok) return;
-
+        const res = await fetch("/api/site-settings", { cache: "no-store" });
         const data = await res.json();
-        const nextSettings = data?.settings ?? data?.siteSettings ?? data;
 
-        if (alive && nextSettings && typeof nextSettings === "object") {
-          setSettings(nextSettings);
+        if (alive && res.ok && data?.success && data?.data) {
+          setSettings(data.data);
         }
       } catch {
-        // Keep fallback branding.
+        // Fallback gracefully to default brand presentation
       }
     }
 
@@ -82,49 +56,30 @@ export default function SiteBrand() {
     };
   }, []);
 
-  const brandName =
-    settings?.siteName ||
-    settings?.name ||
-    settings?.title ||
-    settings?.brandTitle ||
-    "PURE HAVEN BD";
-
-  const subtitle =
-    settings?.siteSubtitle ||
-    settings?.subtitle ||
-    settings?.tagline ||
-    settings?.brandSubtitle ||
-    "";
-
   const logoUrl = normalizeImagePath(
     settings?.logoUrl || settings?.logo || settings?.logoImage || ""
   );
 
-  const split = useMemo(() => splitBrandName(brandName), [brandName]);
-
   return (
-    <Link href="/" className="flex min-w-[150px] items-center justify-center gap-3 text-center">
+    <Link
+      href="/"
+      className="inline-flex items-center justify-center gap-2 text-center transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a5244] rounded-lg"
+    >
       {logoUrl ? (
         <img
           src={logoUrl}
-          alt={brandName}
-          className="h-12 w-auto max-w-[170px] object-contain"
+          alt="PURE HAVEN BD"
+          className="h-8 sm:h-9 w-auto max-w-[120px] object-contain"
           loading="eager"
           decoding="async"
           onError={(event) => {
             event.currentTarget.style.display = "none";
           }}
         />
-      ) : (
-        <span className="flex flex-col items-center leading-none">
-          <span className="text-[28px] font-bold tracking-[0.35em] text-[#161616]">
-            {split.top}
-          </span>
-          <span className="mt-2 text-[13px] uppercase tracking-[0.42em] text-[#8b5a45]">
-            {subtitle || split.bottom}
-          </span>
-        </span>
-      )}
+      ) : null}
+      <span className="text-xs sm:text-base lg:text-lg font-bold tracking-[0.14em] sm:tracking-[0.24em] text-[#161616] uppercase whitespace-nowrap">
+        PURE HAVEN BD
+      </span>
     </Link>
   );
 }
