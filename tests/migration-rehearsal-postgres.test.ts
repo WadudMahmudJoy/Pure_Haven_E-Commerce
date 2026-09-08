@@ -481,7 +481,7 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     let caughtError: { code?: string } | null = null;
     try {
       await client.query(
-        'INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt") VALUES ($1, $2, $3, NOW(), NOW())',
+        'INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt") VALUES ($1, $2, $3, \'LEGACY_LOCAL\', NOW(), NOW())',
         [activeId, "/uploads/products/duplicate.jpg", 1]
       );
     } catch (err: unknown) {
@@ -555,9 +555,9 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
         AND column_name IN ('sourceKind', 'managedMediaId', 'altText')
     `);
     const cols = Object.fromEntries(colRes.rows.map((r: { column_name: string; is_nullable: string }) => [r.column_name, r.is_nullable]));
-    assert.strictEqual(cols.sourceKind, "YES", "ProductImage.sourceKind must be nullable in EXPAND");
-    assert.strictEqual(cols.managedMediaId, "YES", "ProductImage.managedMediaId must be nullable in EXPAND");
-    assert.strictEqual(cols.altText, "YES", "ProductImage.altText must be nullable in EXPAND");
+    assert.strictEqual(cols.sourceKind, "NO", "ProductImage.sourceKind is NOT NULL after CONTRACT");
+    assert.strictEqual(cols.managedMediaId, "YES", "ProductImage.managedMediaId must be nullable in CONTRACT");
+    assert.strictEqual(cols.altText, "YES", "ProductImage.altText must be nullable in CONTRACT");
 
     // 3. Verify all backfilled legacy rows have managedMediaId IS NULL in EXPAND
     const legacyImgRes = await client.query(`
@@ -696,5 +696,260 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     }
     assert.ok(caughtPreconditionError, "Precondition check must abort when unapproved schemes exist");
     assert.match(caughtPreconditionError.message, /PHASE6_CLASSIFY_UNAPPROVED_URL_SCHEME_DETECTED/);
+  });
+
+  it("11. Phase 6 Task 7 CONTRACT: enforces NOT NULL and PostgreSQL CHECK constraints", async () => {
+    // 1. Verify ProductImage.sourceKind is NOT NULL
+    const colRes = await client.query(`
+      SELECT is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'ProductImage'
+        AND column_name = 'sourceKind'
+    `);
+    assert.strictEqual(
+      colRes.rows[0]?.is_nullable,
+      "NO",
+      "ProductImage.sourceKind must be NOT NULL in CONTRACT phase"
+    );
+
+    // Get a valid Product ID
+    const prodRes = await client.query('SELECT id FROM "Product" LIMIT 1');
+    const productId = prodRes.rows[0].id;
+
+    // Create a ManagedMedia row for testing FKs
+    const mediaId = "11111111-1111-4111-8111-111111111111";
+    await client.query(`
+      INSERT INTO "ManagedMedia" (
+        id, "mediaType", "lifecycleState", "ingestPurpose", "ingestActorScope",
+        "ingestIdempotencyKey", "ingestSha256", "ingestByteSize", "ingestMimeType",
+        "stagingProviderKey", "stagingObjectKey", "stagingState", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'IMAGE', 'READY', 'PRODUCT_IMAGE', 'admin:1',
+        'idemp-test-1', 'sha256fake', 1024, 'image/jpeg',
+        'local', 'staging/test-1', 'PRESENT', NOW(), NOW()
+      ) ON CONFLICT (id) DO NOTHING;
+    `, [mediaId]);
+
+    // 2. Reject MANAGED with null managedMediaId
+    let errManagedNull: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+        VALUES ($1, '/uploads/products/managed-invalid.jpg', 901, 'MANAGED', NULL, NOW(), NOW())
+      `, [productId]);
+    } catch (e: unknown) {
+      errManagedNull = e as { code?: string };
+    }
+    assert.ok(errManagedNull, "Expected rejection for MANAGED with NULL managedMediaId");
+    assert.strictEqual(errManagedNull.code, "23514", "Expected SQLSTATE 23514 (check_violation)");
+
+    // 3. Reject LEGACY_LOCAL with non-null managedMediaId
+    let errLegacyNonNull: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+        VALUES ($1, '/uploads/products/legacy-invalid.jpg', 902, 'LEGACY_LOCAL', $2, NOW(), NOW())
+      `, [productId, mediaId]);
+    } catch (e: unknown) {
+      errLegacyNonNull = e as { code?: string };
+    }
+    assert.ok(errLegacyNonNull, "Expected rejection for LEGACY_LOCAL with non-null managedMediaId");
+    assert.strictEqual(errLegacyNonNull.code, "23514", "Expected SQLSTATE 23514 (check_violation)");
+
+    // 4. Reject LEGACY_EXTERNAL with local URL
+    let errExternalLocal: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+        VALUES ($1, '/uploads/products/not-external.jpg', 903, 'LEGACY_EXTERNAL', NULL, NOW(), NOW())
+      `, [productId]);
+    } catch (e: unknown) {
+      errExternalLocal = e as { code?: string };
+    }
+    assert.ok(errExternalLocal, "Expected rejection for LEGACY_EXTERNAL with local URL");
+    assert.strictEqual(errExternalLocal.code, "23514", "Expected SQLSTATE 23514 (check_violation)");
+
+    // 5. Reject LEGACY_LOCAL with HTTPS URL
+    let errLocalHttps: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+        VALUES ($1, 'https://cdn.example.com/not-local.jpg', 904, 'LEGACY_LOCAL', NULL, NOW(), NOW())
+      `, [productId]);
+    } catch (e: unknown) {
+      errLocalHttps = e as { code?: string };
+    }
+    assert.ok(errLocalHttps, "Expected rejection for LEGACY_LOCAL with HTTPS URL");
+    assert.strictEqual(errLocalHttps.code, "23514", "Expected SQLSTATE 23514 (check_violation)");
+
+    // Create a MediaProcessingRun for MediaObject testing
+    const runId = "22222222-2222-4222-8222-222222222222";
+    await client.query(`
+      INSERT INTO "MediaProcessingRun" (
+        id, "managedMediaId", "profileVersion", "profileDefinitionHash",
+        state, "attemptCount", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, 'product-image-v1', 'hash123',
+        'PENDING', 0, NOW(), NOW()
+      ) ON CONFLICT (id) DO NOTHING;
+    `, [runId, mediaId]);
+
+    // 6. Reject MASTER with PUBLIC_DELIVERY
+    let errMasterPublic: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "MediaObject" (
+          id, "processingRunId", role, "accessClass", "variantKey",
+          "storageProviderKey", "objectKey", "mimeType", width, height,
+          "byteSize", "checksumSha256", "createdAt", "updatedAt"
+        ) VALUES (
+          '33333333-3333-4333-8333-333333333331', $1, 'MASTER', 'PUBLIC_DELIVERY', 'master',
+          'local', 'obj/master-invalid', 'image/jpeg', 1000, 1000,
+          50000, 'sha256obj', NOW(), NOW()
+        );
+      `, [runId]);
+    } catch (e: unknown) {
+      errMasterPublic = e as { code?: string };
+    }
+    assert.ok(errMasterPublic, "Expected rejection for MASTER with PUBLIC_DELIVERY");
+    assert.strictEqual(errMasterPublic.code, "23514", "Expected SQLSTATE 23514 (check_violation)");
+
+    // 7. Reject RENDITION with PRIVATE_SOURCE
+    let errRenditionPrivate: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "MediaObject" (
+          id, "processingRunId", role, "accessClass", "variantKey",
+          "storageProviderKey", "objectKey", "mimeType", width, height,
+          "byteSize", "checksumSha256", "createdAt", "updatedAt"
+        ) VALUES (
+          '33333333-3333-4333-8333-333333333332', $1, 'RENDITION', 'PRIVATE_SOURCE', 'w640',
+          'local', 'obj/rendition-invalid', 'image/webp', 640, 640,
+          25000, 'sha256obj2', NOW(), NOW()
+        );
+      `, [runId]);
+    } catch (e: unknown) {
+      errRenditionPrivate = e as { code?: string };
+    }
+    assert.ok(errRenditionPrivate, "Expected rejection for RENDITION with PRIVATE_SOURCE");
+    assert.strictEqual(errRenditionPrivate.code, "23514", "Expected SQLSTATE 23514 (check_violation)");
+  });
+
+  it("12. Phase 6 Task 7 CONTRACT: verifies actual PostgreSQL constraint metadata in pg_constraint and pg_indexes", async () => {
+    // 1. Verify CHECK constraints exist in pg_constraint
+    const checkConstraintsRes = await client.query(`
+      SELECT conname, contype
+      FROM pg_constraint
+      WHERE contype = 'c'
+        AND conname IN (
+          'ProductImage_source_kind_managed_ck',
+          'ProductImage_legacy_url_ck',
+          'MediaObject_role_access_ck',
+          'MediaObject_dimensions_bytes_positive_ck',
+          'ManagedMedia_deleted_tombstone_ck',
+          'ManagedMedia_cleanup_pending_ck',
+          'ManagedMedia_failed_classification_ck',
+          'MediaProcessingRun_complete_ck',
+          'MediaProcessingRun_processing_lease_ck'
+        )
+      ORDER BY conname ASC;
+    `);
+    const foundChecks = checkConstraintsRes.rows.map((r: { conname: string }) => r.conname);
+    assert.strictEqual(foundChecks.length, 9, `Expected 9 CHECK constraints, found ${foundChecks.length}: ${foundChecks.join(", ")}`);
+
+    // 2. Verify all expected indexes exist in pg_indexes
+    const expectedIndexes = [
+      "ProductImage_managedMediaId_idx",
+      "ManagedMedia_lifecycleState_cleanupEligibleAt_idx",
+      "ManagedMedia_lifecycleState_updatedAt_idx",
+      "ManagedMedia_ingestActorScope_ingestPurpose_ingestIdempoten_key",
+      "MediaProcessingRun_state_leaseExpiresAt_idx",
+      "MediaProcessingRun_managedMediaId_state_idx",
+      "MediaProcessingRun_managedMediaId_profileVersion_key",
+      "MediaObject_processingRunId_idx",
+      "MediaObject_processingRunId_variantKey_key",
+      "MediaObject_storageProviderKey_objectKey_key",
+    ];
+    const indexesRes = await client.query(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname = ANY($1::text[])
+      ORDER BY indexname ASC;
+    `, [expectedIndexes]);
+    const foundIndexes = indexesRes.rows.map((r: { indexname: string }) => r.indexname);
+    assert.strictEqual(foundIndexes.length, expectedIndexes.length, `Expected ${expectedIndexes.length} indexes, found ${foundIndexes.length}`);
+  });
+
+  it("13. Phase 6 Task 7 CONTRACT: query plan sanity checks for critical operational indexes", async () => {
+    // 1. Owner lookup by ProductImage.managedMediaId
+    const ownerPlan = await client.query(`
+      EXPLAIN SELECT * FROM "ProductImage" WHERE "managedMediaId" = '00000000-0000-0000-0000-000000000000';
+    `);
+    const ownerPlanText = ownerPlan.rows.map((r: Record<string, string>) => Object.values(r)[0]).join("\n");
+    assert.match(ownerPlanText, /Index Scan|Bitmap Heap Scan|Seq Scan/, "Owner query plan must be valid");
+
+    // 2. Cleanup candidate query by (lifecycleState, cleanupEligibleAt)
+    const cleanupPlan = await client.query(`
+      EXPLAIN SELECT * FROM "ManagedMedia"
+      WHERE "lifecycleState" = 'CLEANUP_PENDING' AND "cleanupEligibleAt" <= NOW();
+    `);
+    const cleanupPlanText = cleanupPlan.rows.map((r: Record<string, string>) => Object.values(r)[0]).join("\n");
+    assert.match(cleanupPlanText, /Index Scan|Bitmap Heap Scan|Seq Scan/, "Cleanup candidate plan must be valid");
+
+    // 3. Stale processing lease query by (state, leaseExpiresAt)
+    const leasePlan = await client.query(`
+      EXPLAIN SELECT * FROM "MediaProcessingRun"
+      WHERE "state" = 'PROCESSING' AND "leaseExpiresAt" <= NOW();
+    `);
+    const leasePlanText = leasePlan.rows.map((r: Record<string, string>) => Object.values(r)[0]).join("\n");
+    assert.match(leasePlanText, /Index Scan|Bitmap Heap Scan|Seq Scan/, "Lease expiry query plan must be valid");
+  });
+
+  it("14. Phase 6 Task 7 CONTRACT: fresh database migration deployment path succeeds", async () => {
+    const freshDbName = `pure_haven_storefront_fresh_${Date.now()}_${process.pid}`;
+    const adminUrl = testBaseUrl.replace(/\/[^/?]+(\?.*)?$/, "/postgres$1");
+    const admin = new Client({ connectionString: adminUrl });
+    await admin.connect();
+    try {
+      await admin.query(`CREATE DATABASE "${freshDbName}";`);
+
+      const freshDbUrl = testBaseUrl.replace(/\/[^/?]+(\?.*)?$/, `/${freshDbName}$1`);
+      const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+      const currentSchemaPath = path.join(process.cwd(), "prisma", "schema.prisma");
+
+      // Deploy full migration chain to the clean empty database
+      const deployOutput = execFileSync(
+        npxCmd,
+        ["prisma", "migrate", "deploy", "--schema", currentSchemaPath],
+        {
+          env: { ...process.env, DATABASE_URL: freshDbUrl },
+          stdio: "pipe",
+          shell: process.platform === "win32",
+        }
+      );
+      assert.match(deployOutput.toString(), /all migrations have been successfully applied/i);
+
+      // Verify all tables exist in fresh database
+      const freshClient = new Client({ connectionString: freshDbUrl });
+      await freshClient.connect();
+      try {
+        const tableCheck = await freshClient.query(`
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_name IN ('Product', 'ProductImage', 'ManagedMedia', 'MediaProcessingRun', 'MediaObject')
+          ORDER BY table_name ASC;
+        `);
+        const tables = tableCheck.rows.map((r: { table_name: string }) => r.table_name);
+        assert.deepStrictEqual(tables, ["ManagedMedia", "MediaObject", "MediaProcessingRun", "Product", "ProductImage"]);
+      } finally {
+        await freshClient.end();
+      }
+    } finally {
+      await admin.query(`DROP DATABASE IF EXISTS "${freshDbName}" WITH (FORCE);`);
+      await admin.end();
+    }
   });
 });

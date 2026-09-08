@@ -162,6 +162,7 @@ describe("Task 4 — Public Catalog Presentation + Batched Media", () => {
           productId: p1.id,
           url: item.url,
           sortOrder: item.sortOrder,
+          sourceKind: "LEGACY_LOCAL",
         },
       });
     }

@@ -1,4 +1,4 @@
-﻿import dotenv from "dotenv";
+import dotenv from "dotenv";
 dotenv.config();
 
 import { describe, it, before, after } from "node:test";
@@ -108,13 +108,13 @@ describe("Task 9 -- Product Detail Shared Gallery Authority", () => {
     productWithGalleryId = prodA.id;
 
     await prisma.productImage.create({
-      data: { productId: prodA.id, url: "/uploads/products/detail-3.jpg", sortOrder: 3 },
+      data: { productId: prodA.id, url: "/uploads/products/detail-3.jpg", sortOrder: 3, sourceKind: "LEGACY_LOCAL" },
     });
     await prisma.productImage.create({
-      data: { productId: prodA.id, url: "/uploads/products/detail-primary.jpg", sortOrder: 1 },
+      data: { productId: prodA.id, url: "/uploads/products/detail-primary.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
     });
     await prisma.productImage.create({
-      data: { productId: prodA.id, url: "/uploads/products/detail-2.jpg", sortOrder: 2 },
+      data: { productId: prodA.id, url: "/uploads/products/detail-2.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
     });
 
     await prisma.productVariant.create({

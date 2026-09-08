@@ -125,6 +125,7 @@ describe("Task 3 — Admin Product Read Contract for Gallery", () => {
         productId: prodA.id,
         url: "/uploads/products/admin-third.jpg",
         sortOrder: 3,
+        sourceKind: "LEGACY_LOCAL",
       },
     });
     await prisma.productImage.create({
@@ -132,6 +133,7 @@ describe("Task 3 — Admin Product Read Contract for Gallery", () => {
         productId: prodA.id,
         url: "/uploads/products/admin-primary.jpg",
         sortOrder: 1,
+        sourceKind: "LEGACY_LOCAL",
       },
     });
     await prisma.productImage.create({
@@ -139,6 +141,7 @@ describe("Task 3 — Admin Product Read Contract for Gallery", () => {
         productId: prodA.id,
         url: "/uploads/products/admin-second.jpg",
         sortOrder: 2,
+        sourceKind: "LEGACY_LOCAL",
       },
     });
 
@@ -289,7 +292,7 @@ describe("Task 3 — Admin Product Read Contract for Gallery", () => {
     assert.strictEqual(typeof detail.updatedAt, "string");
   });
 
-  it("G. Bridge compatibility: ProductImage rows with null sourceKind read cleanly", async () => {
+  it("G. Bridge compatibility: ProductImage rows with legacy sourceKind read cleanly", async () => {
     const bridgeProduct = await prisma.product.create({
       data: {
         name: "Bridge Null SourceKind Product",
@@ -298,8 +301,8 @@ describe("Task 3 — Admin Product Read Contract for Gallery", () => {
         category: "Skincare",
         images: {
           create: [
-            { url: "/uploads/products/bridge-null.jpg", sortOrder: 1, sourceKind: null },
-            { url: "/images/secondary-bridge.jpg", sortOrder: 2, sourceKind: null },
+            { url: "/uploads/products/bridge-null.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+            { url: "/images/secondary-bridge.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
           ],
         },
       },

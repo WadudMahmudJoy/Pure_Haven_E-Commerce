@@ -418,21 +418,21 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
 
     // Seed ProductImages for multi-image product (distinct images not used elsewhere)
     await dbClient.query(`
-      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt")
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt")
       VALUES
-        (${multiImageProductId}, '/images/products/bodyspray.jpg', 1, NOW(), NOW()),
-        (${multiImageProductId}, '/images/products/cleanser.jpg', 2, NOW(), NOW()),
-        (${multiImageProductId}, '/images/products/honey.jpg', 3, NOW(), NOW()),
-        (${multiImageProductId}, '/images/products/sunscreen.jpg', 4, NOW(), NOW());
+        (${multiImageProductId}, '/images/products/bodyspray.jpg', 1, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${multiImageProductId}, '/images/products/cleanser.jpg', 2, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${multiImageProductId}, '/images/products/honey.jpg', 3, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${multiImageProductId}, '/images/products/sunscreen.jpg', 4, 'LEGACY_LOCAL', NOW(), NOW());
     `);
 
     // Seed ProductImages for Variant Product
     await dbClient.query(`
-      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt")
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt")
       VALUES
-        (${variantProductId}, '/images/categories/skincare.jpg', 1, NOW(), NOW()),
-        (${variantProductId}, '/images/categories/haircare.jpg', 2, NOW(), NOW()),
-        (${variantProductId}, '/images/categories/bodycare.jpg', 3, NOW(), NOW());
+        (${variantProductId}, '/images/categories/skincare.jpg', 1, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${variantProductId}, '/images/categories/haircare.jpg', 2, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${variantProductId}, '/images/categories/bodycare.jpg', 3, 'LEGACY_LOCAL', NOW(), NOW());
     `);
 
     // Seed ProductVariants for Variant Product (Variant 1 has NO image, Variant 2 HAS image)
@@ -445,26 +445,26 @@ describe("Task 11 — Storefront Full Responsive Browser QA & Evidence", () => {
 
     // Seed Admin Single Image (1 image)
     await dbClient.query(`
-      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt")
-      VALUES (${adminSingleImageProductId}, '/images/hero/lotion.jpg', 1, NOW(), NOW());
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt")
+      VALUES (${adminSingleImageProductId}, '/images/hero/lotion.jpg', 1, 'LEGACY_LOCAL', NOW(), NOW());
     `);
 
     // Seed Admin Reorder Product (4 images)
     await dbClient.query(`
-      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt")
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt")
       VALUES
-        (${adminReorderProductId}, '/images/categories/skincare.jpg', 1, NOW(), NOW()),
-        (${adminReorderProductId}, '/images/categories/bodycare.jpg', 2, NOW(), NOW()),
-        (${adminReorderProductId}, '/images/categories/haircare.jpg', 3, NOW(), NOW()),
-        (${adminReorderProductId}, '/images/categories/cosmetics.jpg', 4, NOW(), NOW());
+        (${adminReorderProductId}, '/images/categories/skincare.jpg', 1, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${adminReorderProductId}, '/images/categories/bodycare.jpg', 2, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${adminReorderProductId}, '/images/categories/haircare.jpg', 3, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${adminReorderProductId}, '/images/categories/cosmetics.jpg', 4, 'LEGACY_LOCAL', NOW(), NOW());
     `);
 
     // Seed Admin Metadata Product (2 images)
     await dbClient.query(`
-      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt")
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt")
       VALUES
-        (${adminMetadataProductId}, '/images/categories/bodycare.jpg', 1, NOW(), NOW()),
-        (${adminMetadataProductId}, '/images/categories/essentials.jpg', 2, NOW(), NOW());
+        (${adminMetadataProductId}, '/images/categories/bodycare.jpg', 1, 'LEGACY_LOCAL', NOW(), NOW()),
+        (${adminMetadataProductId}, '/images/categories/essentials.jpg', 2, 'LEGACY_LOCAL', NOW(), NOW());
     `);
 
     // Seed Ephemeral Admin Credential (in-memory password, scrypt hash in DB only)

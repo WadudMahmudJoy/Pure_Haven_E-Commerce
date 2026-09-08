@@ -64,8 +64,8 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
 
       // Run backfill query for seeded fixtures
       await client.query(`
-        INSERT INTO "ProductImage" ("productId", "url", "sortOrder", "createdAt", "updatedAt")
-        SELECT p."id", TRIM(p."image"), 1, NOW(), NOW()
+        INSERT INTO "ProductImage" ("productId", "url", "sortOrder", "sourceKind", "createdAt", "updatedAt")
+        SELECT p."id", TRIM(p."image"), 1, 'LEGACY_LOCAL', NOW(), NOW()
         FROM "Product" p
         WHERE p."image" IS NOT NULL
           AND TRIM(p."image") <> ''
@@ -303,7 +303,7 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
     let error: { code?: string } | null = null;
     try {
       await client.query(
-        'INSERT INTO "ProductImage" ("productId", url, "sortOrder", "createdAt", "updatedAt") VALUES ($1, $2, $3, NOW(), NOW())',
+        'INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "createdAt", "updatedAt") VALUES ($1, $2, $3, \'LEGACY_LOCAL\', NOW(), NOW())',
         [activeId, "/uploads/products/duplicate.jpg", 1]
       );
     } catch (err: unknown) {
@@ -342,8 +342,8 @@ describe("Phase 6 Task 4 — Additive EXPAND Persistence Schema Contract", () =>
     assert.match(schema, /model ManagedMedia\s*\{/, "ManagedMedia model must exist in schema");
     assert.match(schema, /model MediaProcessingRun\s*\{/, "MediaProcessingRun model must exist in schema");
     assert.match(schema, /model MediaObject\s*\{/, "MediaObject model must exist in schema");
-    assert.match(schema, /sourceKind\s+ProductImageSourceKind\?/, "ProductImage.sourceKind must be nullable in EXPAND");
-    assert.match(schema, /managedMediaId\s+String\?/, "ProductImage.managedMediaId must be nullable in EXPAND");
+    assert.match(schema, /sourceKind\s+ProductImageSourceKind\b/, "ProductImage.sourceKind must exist in schema");
+    assert.match(schema, /managedMediaId\s+String\?/, "ProductImage.managedMediaId must be nullable in CONTRACT");
     assert.doesNotMatch(schema, /referenceCount|isAttached|ownerType\s+String/, "No referenceCount, isAttached, or polymorphic ownerType");
 
     const mediaObjectMatch = schema.match(/model MediaObject\s*\{([\s\S]*?)\}/);

@@ -154,11 +154,13 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
           productId: product.id,
           url: "/uploads/products/original-primary.jpg",
           sortOrder: 1,
+          sourceKind: "LEGACY_LOCAL",
         },
         {
           productId: product.id,
           url: "/uploads/products/original-secondary.jpg",
           sortOrder: 2,
+          sourceKind: "LEGACY_LOCAL",
         },
       ],
     });
@@ -230,9 +232,9 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/images/p1.jpg", sortOrder: 1 },
-        { productId: product.id, url: "/images/p2.jpg", sortOrder: 2 },
-        { productId: product.id, url: "/images/p3.jpg", sortOrder: 3 },
+        { productId: product.id, url: "/images/p1.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/images/p2.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/images/p3.jpg", sortOrder: 3, sourceKind: "LEGACY_LOCAL" },
       ],
     });
 
@@ -372,9 +374,9 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/uploads/products/old-primary.jpg", sortOrder: 1 },
-        { productId: product.id, url: "/uploads/products/preserved-second.jpg", sortOrder: 2 },
-        { productId: product.id, url: "/uploads/products/preserved-third.jpg", sortOrder: 3 },
+        { productId: product.id, url: "/uploads/products/old-primary.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/uploads/products/preserved-second.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/uploads/products/preserved-third.jpg", sortOrder: 3, sourceKind: "LEGACY_LOCAL" },
       ],
     });
 
@@ -443,8 +445,8 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/images/primary.jpg", sortOrder: 1 },
-        { productId: product.id, url: "/images/secondary.jpg", sortOrder: 2 },
+        { productId: product.id, url: "/images/primary.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/images/secondary.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
       ],
     });
 
@@ -577,8 +579,8 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/uploads/products/unchanged.jpg", sortOrder: 1 },
-        { productId: product.id, url: "/uploads/products/secondary-unchanged.jpg", sortOrder: 2 },
+        { productId: product.id, url: "/uploads/products/unchanged.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/uploads/products/secondary-unchanged.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
       ],
     });
 
@@ -669,8 +671,8 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/images/original-roll.jpg", sortOrder: 1 },
-        { productId: product.id, url: "/images/original-roll-2.jpg", sortOrder: 2 },
+        { productId: product.id, url: "/images/original-roll.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/images/original-roll-2.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
       ],
     });
 
@@ -867,8 +869,8 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/images/first.jpg", sortOrder: 1 },
-        { productId: product.id, url: "/images/second.jpg", sortOrder: 2 },
+        { productId: product.id, url: "/images/first.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: "/images/second.jpg", sortOrder: 2, sourceKind: "LEGACY_LOCAL" },
       ],
     });
 
@@ -1135,8 +1137,8 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
 
     await prisma.productImage.createMany({
       data: [
-        { productId: product.id, url: "/uploads/products/p1.jpg", sortOrder: 1 },
-        { productId: product.id, url: " /uploads/products/p2.jpg ", sortOrder: 2 }, // secondary has whitespace
+        { productId: product.id, url: "/uploads/products/p1.jpg", sortOrder: 1, sourceKind: "LEGACY_LOCAL" },
+        { productId: product.id, url: " /uploads/products/p2.jpg ", sortOrder: 2, sourceKind: "LEGACY_LOCAL" }, // secondary has whitespace
       ],
     });
 
