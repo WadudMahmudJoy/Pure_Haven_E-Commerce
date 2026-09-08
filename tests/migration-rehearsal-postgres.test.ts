@@ -99,6 +99,22 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
       isActive: true,
       deletedAt: null,
     },
+    {
+      name: "Rehearsal Images Root Product",
+      price: 350.0,
+      image: "/images/rehearsal-gallery.jpg",
+      category: "Skincare",
+      isActive: true,
+      deletedAt: null,
+    },
+    {
+      name: "Rehearsal External HTTPS Product",
+      price: 400.0,
+      image: "https://cdn.example.com/rehearsal-external.jpg",
+      category: "Skincare",
+      isActive: true,
+      deletedAt: null,
+    },
   ];
 
   before(async () => {
@@ -439,9 +455,11 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     `);
     const expectedMap: Record<string, string> = {
       "Rehearsal Active Product": "/uploads/products/rehearsal-active.jpg",
+      "Rehearsal Empty-Image Product": "",
+      "Rehearsal External HTTPS Product": "https://cdn.example.com/rehearsal-external.jpg",
+      "Rehearsal Images Root Product": "/images/rehearsal-gallery.jpg",
       "Rehearsal Inactive Product": "   /uploads/products/rehearsal-inactive.jpg   ",
       "Rehearsal Soft-Deleted Product": "/uploads/products/rehearsal-deleted.jpg",
-      "Rehearsal Empty-Image Product": "",
     };
 
     for (const prod of prodRes.rows) {
@@ -541,14 +559,13 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     assert.strictEqual(cols.managedMediaId, "YES", "ProductImage.managedMediaId must be nullable in EXPAND");
     assert.strictEqual(cols.altText, "YES", "ProductImage.altText must be nullable in EXPAND");
 
-    // 3. Verify all backfilled legacy rows have sourceKind IS NULL and managedMediaId IS NULL in EXPAND
+    // 3. Verify all backfilled legacy rows have managedMediaId IS NULL in EXPAND
     const legacyImgRes = await client.query(`
       SELECT id, "sourceKind", "managedMediaId", url
       FROM "ProductImage"
     `);
     assert.ok(legacyImgRes.rows.length > 0, "Backfilled ProductImage rows must exist");
     for (const row of legacyImgRes.rows) {
-      assert.strictEqual(row.sourceKind, null, "Historical ProductImage.sourceKind must be NULL in EXPAND");
       assert.strictEqual(row.managedMediaId, null, "Historical ProductImage.managedMediaId must be NULL in EXPAND");
     }
 
@@ -592,5 +609,92 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     assert.ok(objFk, "MediaObject.processingRunId FK must exist");
     assert.strictEqual(objFk.foreign_table_name, "MediaProcessingRun");
     assert.strictEqual(objFk.delete_rule, "CASCADE", "MediaObject -> MediaProcessingRun FK must be ON DELETE CASCADE");
+  });
+
+  it("10. Phase 6 Task 6 CLASSIFY: all historical ProductImage rows classified with zero null sourceKind", async () => {
+    // 1. Assert zero null sourceKind rows remaining
+    const nullRes = await client.query(`
+      SELECT count(*)::int AS count
+      FROM "ProductImage"
+      WHERE "sourceKind" IS NULL
+    `);
+    assert.strictEqual(
+      nullRes.rows[0].count,
+      0,
+      `All ProductImage rows must have non-null sourceKind after CLASSIFY (found ${nullRes.rows[0].count} null)`
+    );
+
+    // 2. Assert exact classification mapping
+    const rowsRes = await client.query(`
+      SELECT url, "sourceKind"
+      FROM "ProductImage"
+    `);
+    assert.ok(rowsRes.rows.length >= 5, "At least 5 backfilled ProductImage rows must exist");
+    for (const row of rowsRes.rows) {
+      if (row.url.startsWith("/uploads/products/") || row.url.startsWith("/images/")) {
+        assert.strictEqual(row.sourceKind, "LEGACY_LOCAL", `Expected ${row.url} to be LEGACY_LOCAL`);
+      } else if (row.url.startsWith("https://")) {
+        assert.strictEqual(row.sourceKind, "LEGACY_EXTERNAL", `Expected ${row.url} to be LEGACY_EXTERNAL`);
+      } else {
+        assert.fail(`Unexpected ProductImage url: ${row.url}`);
+      }
+    }
+
+    // 3. Zero ManagedMedia rows created
+    const mediaCountRes = await client.query('SELECT count(*)::int AS count FROM "ManagedMedia"');
+    assert.strictEqual(mediaCountRes.rows[0].count, 0, "CLASSIFY must NOT create ManagedMedia rows");
+
+    // 4. All managedMediaId fields on historical rows remain null
+    const nonNullFkRes = await client.query(`
+      SELECT count(*)::int AS count
+      FROM "ProductImage"
+      WHERE "managedMediaId" IS NOT NULL
+    `);
+    assert.strictEqual(nonNullFkRes.rows[0].count, 0, "Historical ProductImage managedMediaId must remain null");
+
+    // 5. Test idempotency of CLASSIFY SQL: re-running UPDATE statements modifies 0 rows
+    const rerunUpdate1 = await client.query(`
+      UPDATE "ProductImage"
+      SET "sourceKind" = 'LEGACY_LOCAL'
+      WHERE "sourceKind" IS NULL
+        AND ("url" LIKE '/uploads/products/%' OR "url" LIKE '/images/%');
+    `);
+    assert.strictEqual(rerunUpdate1.rowCount, 0, "Idempotent classification must update 0 rows on rerun");
+
+    const rerunUpdate2 = await client.query(`
+      UPDATE "ProductImage"
+      SET "sourceKind" = 'LEGACY_EXTERNAL'
+      WHERE "sourceKind" IS NULL
+        AND "url" LIKE 'https://%';
+    `);
+    assert.strictEqual(rerunUpdate2.rowCount, 0, "Idempotent classification must update 0 rows on rerun");
+
+    // 6. Test precondition guard: unapproved URL scheme triggers exception
+    let caughtPreconditionError: Error | null = null;
+    try {
+      await client.query(`
+        DO $$
+        DECLARE
+          unapproved_count INTEGER;
+        BEGIN
+          SELECT COUNT(*) INTO unapproved_count
+          FROM (SELECT 'ftp://malicious.com/test.jpg' AS url, NULL::"ProductImageSourceKind" AS "sourceKind") simulated
+          WHERE "sourceKind" IS NULL
+            AND NOT (
+              "url" LIKE '/uploads/products/%'
+              OR "url" LIKE '/images/%'
+              OR "url" LIKE 'https://%'
+            );
+
+          IF unapproved_count > 0 THEN
+            RAISE EXCEPTION 'PHASE6_CLASSIFY_UNAPPROVED_URL_SCHEME_DETECTED: found % rows outside approved roots', unapproved_count;
+          END IF;
+        END $$;
+      `);
+    } catch (err: unknown) {
+      caughtPreconditionError = err as Error;
+    }
+    assert.ok(caughtPreconditionError, "Precondition check must abort when unapproved schemes exist");
+    assert.match(caughtPreconditionError.message, /PHASE6_CLASSIFY_UNAPPROVED_URL_SCHEME_DETECTED/);
   });
 });
