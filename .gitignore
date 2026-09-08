@@ -65,5 +65,8 @@ security-backup-step*/
 /_phase*/
 
 
+# Local media storage directory
+.local-media/
+
 # Keep safe environment template
 !.env.example
