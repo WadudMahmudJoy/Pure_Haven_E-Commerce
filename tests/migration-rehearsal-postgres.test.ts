@@ -603,12 +603,12 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     const runFk = fks.find((f) => f.table_name === "MediaProcessingRun" && f.column_name === "managedMediaId");
     assert.ok(runFk, "MediaProcessingRun.managedMediaId FK must exist");
     assert.strictEqual(runFk.foreign_table_name, "ManagedMedia");
-    assert.strictEqual(runFk.delete_rule, "CASCADE", "MediaProcessingRun -> ManagedMedia FK must be ON DELETE CASCADE");
+    assert.strictEqual(runFk.delete_rule, "RESTRICT", "MediaProcessingRun -> ManagedMedia FK must be ON DELETE RESTRICT");
 
     const objFk = fks.find((f) => f.table_name === "MediaObject" && f.column_name === "processingRunId");
     assert.ok(objFk, "MediaObject.processingRunId FK must exist");
     assert.strictEqual(objFk.foreign_table_name, "MediaProcessingRun");
-    assert.strictEqual(objFk.delete_rule, "CASCADE", "MediaObject -> MediaProcessingRun FK must be ON DELETE CASCADE");
+    assert.strictEqual(objFk.delete_rule, "RESTRICT", "MediaObject -> MediaProcessingRun FK must be ON DELETE RESTRICT");
   });
 
   it("10. Phase 6 Task 6 CLASSIFY: all historical ProductImage rows classified with zero null sourceKind", async () => {
@@ -999,5 +999,182 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
       await admin.query(`DROP DATABASE IF EXISTS "${freshDbName}" WITH (FORCE);`);
       await admin.end();
     }
+  });
+
+  it("15. Phase 6 Final Persistence Contract: proves UUID types and restrictive FK delete rules (RED -> GREEN)", async () => {
+    // A. Prove media identity and FK columns have data_type = 'uuid' in PostgreSQL
+    const uuidCols = [
+      { table: "ManagedMedia", column: "id" },
+      { table: "ManagedMedia", column: "activeProcessingRunId" },
+      { table: "ManagedMedia", column: "canonicalMasterObjectId" },
+      { table: "MediaProcessingRun", column: "id" },
+      { table: "MediaProcessingRun", column: "managedMediaId" },
+      { table: "MediaObject", column: "id" },
+      { table: "MediaObject", column: "processingRunId" },
+      { table: "ProductImage", column: "managedMediaId" },
+    ];
+    for (const c of uuidCols) {
+      const colRes = await client.query(`
+        SELECT data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2;
+      `, [c.table, c.column]);
+      assert.strictEqual(
+        colRes.rows[0]?.data_type,
+        "uuid",
+        `Expected ${c.table}.${c.column} to have PostgreSQL data_type 'uuid', but found '${colRes.rows[0]?.data_type}'`
+      );
+    }
+
+    // B. Prove foreign key delete rules are RESTRICT, not CASCADE or SET NULL
+    const fkRes = await client.query(`
+      SELECT
+        tc.table_name,
+        kcu.column_name,
+        ccu.table_name AS foreign_table_name,
+        rc.delete_rule
+      FROM information_schema.table_constraints AS tc
+      JOIN information_schema.key_column_usage AS kcu
+        ON tc.constraint_name = kcu.constraint_name
+      JOIN information_schema.constraint_column_usage AS ccu
+        ON ccu.constraint_name = tc.constraint_name
+      JOIN information_schema.referential_constraints AS rc
+        ON rc.constraint_name = tc.constraint_name
+      WHERE tc.constraint_type = 'FOREIGN KEY'
+    `);
+    const fks = fkRes.rows as Array<{ table_name: string; column_name: string; foreign_table_name: string; delete_rule: string }>;
+
+    const runToMediaFk = fks.find((f) => f.table_name === "MediaProcessingRun" && f.column_name === "managedMediaId");
+    assert.strictEqual(runToMediaFk?.delete_rule, "RESTRICT", "MediaProcessingRun -> ManagedMedia must be ON DELETE RESTRICT");
+
+    const objToRunFk = fks.find((f) => f.table_name === "MediaObject" && f.column_name === "processingRunId");
+    assert.strictEqual(objToRunFk?.delete_rule, "RESTRICT", "MediaObject -> MediaProcessingRun must be ON DELETE RESTRICT");
+
+    const mediaToRunFk = fks.find((f) => f.table_name === "ManagedMedia" && f.column_name === "activeProcessingRunId");
+    assert.strictEqual(mediaToRunFk?.delete_rule, "RESTRICT", "ManagedMedia -> activeProcessingRun must be ON DELETE RESTRICT");
+
+    const mediaToMasterFk = fks.find((f) => f.table_name === "ManagedMedia" && f.column_name === "canonicalMasterObjectId");
+    assert.strictEqual(mediaToMasterFk?.delete_rule, "RESTRICT", "ManagedMedia -> canonicalMasterObject must be ON DELETE RESTRICT");
+
+    // C. Behavioral Integrity Proofs on Disposable PostgreSQL
+    const testMediaId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const testRunId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const testObjectId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+    // 1. Insert test ManagedMedia row
+    await client.query(`
+      INSERT INTO "ManagedMedia" (
+        id, "mediaType", "lifecycleState", "ingestPurpose", "ingestActorScope",
+        "ingestIdempotencyKey", "ingestSha256", "ingestByteSize", "ingestMimeType",
+        "stagingProviderKey", "stagingObjectKey", "stagingState", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'IMAGE', 'READY', 'PRODUCT_IMAGE', 'admin:test',
+        'idemp-final-1', 'sha256fakefinal', 2048, 'image/jpeg',
+        'local-test', 'staging/final-1', 'PRESENT', NOW(), NOW()
+      );
+    `, [testMediaId]);
+
+    // 2. Insert test MediaProcessingRun row referencing ManagedMedia
+    await client.query(`
+      INSERT INTO "MediaProcessingRun" (
+        id, "managedMediaId", "profileVersion", "profileDefinitionHash",
+        state, "attemptCount", "completedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, 'profile-v1', 'hashfinal',
+        'COMPLETE', 1, NOW(), NOW(), NOW()
+      );
+    `, [testRunId, testMediaId]);
+
+    // 3. Insert test MediaObject row referencing MediaProcessingRun
+    await client.query(`
+      INSERT INTO "MediaObject" (
+        id, "processingRunId", role, "accessClass", "variantKey",
+        "storageProviderKey", "objectKey", "mimeType", width, height,
+        "byteSize", "checksumSha256", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, 'MASTER', 'PRIVATE_SOURCE', 'master',
+        'local-test', 'obj/master-final', 'image/jpeg', 1200, 1200,
+        150000, 'sha256finalmaster', NOW(), NOW()
+      );
+    `, [testObjectId, testRunId]);
+
+    // 4. Update ManagedMedia with activeProcessingRunId and canonicalMasterObjectId
+    await client.query(`
+      UPDATE "ManagedMedia"
+      SET "activeProcessingRunId" = $1, "canonicalMasterObjectId" = $2
+      WHERE id = $3;
+    `, [testRunId, testObjectId, testMediaId]);
+
+    // PROOF 2: Direct DELETE ManagedMedia while ProcessingRun references it is rejected
+    let errDeleteMedia: { code?: string } | null = null;
+    try {
+      await client.query('DELETE FROM "ManagedMedia" WHERE id = $1', [testMediaId]);
+    } catch (e: unknown) {
+      errDeleteMedia = e as { code?: string };
+    }
+    assert.ok(errDeleteMedia, "DELETE ManagedMedia must be rejected while referenced");
+    assert.strictEqual(errDeleteMedia.code, "23503", "Expected SQLSTATE 23503 (foreign_key_violation)");
+
+    // PROOF 3: Direct DELETE MediaProcessingRun while MediaObject references it is rejected
+    let errDeleteRun: { code?: string } | null = null;
+    try {
+      await client.query('DELETE FROM "MediaProcessingRun" WHERE id = $1', [testRunId]);
+    } catch (e: unknown) {
+      errDeleteRun = e as { code?: string };
+    }
+    assert.ok(errDeleteRun, "DELETE MediaProcessingRun must be rejected while referenced");
+    assert.strictEqual(errDeleteRun.code, "23503", "Expected SQLSTATE 23503 (foreign_key_violation)");
+
+    // PROOF 4: Direct DELETE MediaObject while ManagedMedia.canonicalMasterObjectId references it is rejected
+    let errDeleteMaster: { code?: string } | null = null;
+    try {
+      await client.query('DELETE FROM "MediaObject" WHERE id = $1', [testObjectId]);
+    } catch (e: unknown) {
+      errDeleteMaster = e as { code?: string };
+    }
+    assert.ok(errDeleteMaster, "DELETE MediaObject must be rejected while canonicalMasterObjectId references it");
+    assert.strictEqual(errDeleteMaster.code, "23503", "Expected SQLSTATE 23503 (foreign_key_violation)");
+
+    // PROOF 5 & 6 & 7: Product delete cascades to ProductImage, but leaves ManagedMedia intact
+    const prodRes = await client.query(`
+      INSERT INTO "Product" (name, price, image, category, "isActive", "updatedAt")
+      VALUES ('Cascade Product', 500, '/uploads/products/cascade.jpg', 'Skincare', true, NOW())
+      RETURNING id;
+    `);
+    const cascadeProdId = prodRes.rows[0].id;
+
+    // Insert ProductImage referencing ManagedMedia
+    await client.query(`
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+      VALUES ($1, '/uploads/products/cascade.jpg', 1, 'MANAGED', $2, NOW(), NOW());
+    `, [cascadeProdId, testMediaId]);
+
+    // Verify ProductImage row exists
+    const imgBefore = await client.query('SELECT count(*)::int AS count FROM "ProductImage" WHERE "productId" = $1', [cascadeProdId]);
+    assert.strictEqual(imgBefore.rows[0].count, 1);
+
+    // Delete Product
+    await client.query('DELETE FROM "Product" WHERE id = $1', [cascadeProdId]);
+
+    // ProductImage rows must cascade
+    const imgAfter = await client.query('SELECT count(*)::int AS count FROM "ProductImage" WHERE "productId" = $1', [cascadeProdId]);
+    assert.strictEqual(imgAfter.rows[0].count, 0, "ProductImage must cascade on Product deletion");
+
+    // ManagedMedia must NOT be deleted
+    const mediaAfter = await client.query('SELECT count(*)::int AS count FROM "ManagedMedia" WHERE id = $1', [testMediaId]);
+    assert.strictEqual(mediaAfter.rows[0].count, 1, "ManagedMedia must NOT be deleted when Product is deleted");
+
+    // PROOF 8: ProductImage.managedMediaId restricts invalid parent
+    let errInvalidParent: { code?: string } | null = null;
+    try {
+      await client.query(`
+        INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+        VALUES (1, '/uploads/products/invalid-parent.jpg', 999, 'MANAGED', '99999999-9999-4999-8999-999999999999', NOW(), NOW());
+      `);
+    } catch (e: unknown) {
+      errInvalidParent = e as { code?: string };
+    }
+    assert.ok(errInvalidParent, "ProductImage must reject non-existent managedMediaId");
+    assert.strictEqual(errInvalidParent.code, "23503", "Expected SQLSTATE 23503 for invalid parent managedMediaId");
   });
 });

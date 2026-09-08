@@ -164,7 +164,7 @@ model ProductImage {
   productId      Int
   product        Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
   sourceKind     ProductImageSourceKind
-  managedMediaId String?
+  managedMediaId String?                 @db.Uuid
   managedMedia   ManagedMedia?           @relation(fields: [managedMediaId], references: [id], onDelete: Restrict)
   url            String
   altText        String?
@@ -177,7 +177,7 @@ model ProductImage {
 }
 
 model ManagedMedia {
-  id                      String                     @id @default(uuid())
+  id                      String                     @id @default(uuid()) @db.Uuid
   mediaType               ManagedMediaType           @default(IMAGE)
   lifecycleState          ManagedMediaLifecycleState @default(PENDING)
 
@@ -195,11 +195,11 @@ model ManagedMedia {
   stagingObjectKey        String
   stagingState            MediaStagingState          @default(ALLOCATED)
 
-  activeProcessingRunId   String?
-  activeProcessingRun     MediaProcessingRun?        @relation("ManagedMediaActiveProcessingRun", fields: [activeProcessingRunId], references: [id], onDelete: SetNull)
+  activeProcessingRunId   String?                    @db.Uuid
+  activeProcessingRun     MediaProcessingRun?        @relation("ManagedMediaActiveProcessingRun", fields: [activeProcessingRunId], references: [id], onDelete: Restrict)
 
-  canonicalMasterObjectId String?
-  canonicalMasterObject   MediaObject?               @relation("ManagedMediaCanonicalMasterObject", fields: [canonicalMasterObjectId], references: [id], onDelete: SetNull)
+  canonicalMasterObjectId String?                    @db.Uuid
+  canonicalMasterObject   MediaObject?               @relation("ManagedMediaCanonicalMasterObject", fields: [canonicalMasterObjectId], references: [id], onDelete: Restrict)
 
   deliveryDisabledAt      DateTime?
 
@@ -224,9 +224,9 @@ model ManagedMedia {
 }
 
 model MediaProcessingRun {
-  id                    String                  @id @default(uuid())
-  managedMediaId        String
-  managedMedia          ManagedMedia            @relation("ManagedMediaProcessingRuns", fields: [managedMediaId], references: [id], onDelete: Cascade)
+  id                    String                  @id @default(uuid()) @db.Uuid
+  managedMediaId        String                  @db.Uuid
+  managedMedia          ManagedMedia            @relation("ManagedMediaProcessingRuns", fields: [managedMediaId], references: [id], onDelete: Restrict)
 
   profileVersion        String
   profileDefinitionHash String
@@ -250,9 +250,9 @@ model MediaProcessingRun {
 }
 
 model MediaObject {
-  id                             String             @id @default(uuid())
-  processingRunId                String
-  processingRun                  MediaProcessingRun @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
+  id                             String             @id @default(uuid()) @db.Uuid
+  processingRunId                String             @db.Uuid
+  processingRun                  MediaProcessingRun @relation(fields: [processingRunId], references: [id], onDelete: Restrict)
 
   role                           MediaObjectRole
   accessClass                    MediaAccessClass
