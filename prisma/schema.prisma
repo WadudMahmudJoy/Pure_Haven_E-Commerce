@@ -187,7 +187,7 @@ model ManagedMedia {
   ingestSha256            String
   ingestByteSize          BigInt
   ingestMimeType          String
-  originalFilename        String?
+  originalFilename        String?                    @db.VarChar(255)
   sourceWidth             Int?
   sourceHeight            Int?
 
@@ -209,7 +209,7 @@ model ManagedMedia {
   cleanupLastAttemptAt    DateTime?
 
   failurePhase            MediaFailurePhase?
-  failureCode             String?
+  failureCode             String?                    @db.VarChar(100)
 
   deletedAt               DateTime?
   createdAt               DateTime                   @default(now())
@@ -236,7 +236,7 @@ model MediaProcessingRun {
   lastHeartbeatAt       DateTime?
   leaseExpiresAt        DateTime?
   failurePhase          MediaFailurePhase?
-  failureCode           String?
+  failureCode           String?                 @db.VarChar(100)
   completedAt           DateTime?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt

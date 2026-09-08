@@ -624,13 +624,29 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
       `All ProductImage rows must have non-null sourceKind after CLASSIFY (found ${nullRes.rows[0].count} null)`
     );
 
-    // 2. Assert exact classification mapping
+    // 2. Assert exact classification mapping and counts
+    const localCountRes = await client.query('SELECT count(*)::int AS count FROM "ProductImage" WHERE "sourceKind" = \'LEGACY_LOCAL\'');
+    const externalCountRes = await client.query('SELECT count(*)::int AS count FROM "ProductImage" WHERE "sourceKind" = \'LEGACY_EXTERNAL\'');
+    const unapprovedCountRes = await client.query('SELECT count(*)::int AS count FROM "ProductImage" WHERE "sourceKind" NOT IN (\'LEGACY_LOCAL\', \'LEGACY_EXTERNAL\')');
+    const totalPiRes = await client.query('SELECT count(*)::int AS count FROM "ProductImage"');
+
+    assert.strictEqual(localCountRes.rows[0].count, 4, "Expected exactly 4 LEGACY_LOCAL rows");
+    assert.strictEqual(externalCountRes.rows[0].count, 1, "Expected exactly 1 LEGACY_EXTERNAL row");
+    assert.strictEqual(unapprovedCountRes.rows[0].count, 0, "Expected 0 unapproved/unknown rows");
+    assert.strictEqual(totalPiRes.rows[0].count, 5, "Expected 5 total ProductImage rows");
+
     const rowsRes = await client.query(`
-      SELECT url, "sourceKind"
+      SELECT id, "productId", url, "sortOrder", "sourceKind"
       FROM "ProductImage"
+      ORDER BY id ASC
     `);
-    assert.ok(rowsRes.rows.length >= 5, "At least 5 backfilled ProductImage rows must exist");
+    assert.strictEqual(rowsRes.rows.length, 5, "Expected exactly 5 backfilled ProductImage rows");
     for (const row of rowsRes.rows) {
+      assert.ok(row.id > 0, "ID must be a positive integer");
+      assert.ok(row.productId > 0, "productId must be a positive integer");
+      assert.ok(row.sortOrder >= 1, "sortOrder must be positive");
+      assert.ok(row.url && row.url.length > 0, "url must be non-empty");
+
       if (row.url.startsWith("/uploads/products/") || row.url.startsWith("/images/")) {
         assert.strictEqual(row.sourceKind, "LEGACY_LOCAL", `Expected ${row.url} to be LEGACY_LOCAL`);
       } else if (row.url.startsWith("https://")) {
@@ -638,6 +654,18 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
       } else {
         assert.fail(`Unexpected ProductImage url: ${row.url}`);
       }
+    }
+
+    // Verify Product.image values remain untouched
+    const prodCheck = await client.query(`
+      SELECT p.id, p.name, p.image, pi.url
+      FROM "Product" p
+      JOIN "ProductImage" pi ON pi."productId" = p.id
+      WHERE p.name LIKE 'Rehearsal %'
+      ORDER BY p.id ASC
+    `);
+    for (const row of prodCheck.rows) {
+      assert.strictEqual(row.image.trim(), row.url, "Product.image must remain identical to backfilled ProductImage.url");
     }
 
     // 3. Zero ManagedMedia rows created
@@ -880,6 +908,26 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
     `, [expectedIndexes]);
     const foundIndexes = indexesRes.rows.map((r: { indexname: string }) => r.indexname);
     assert.strictEqual(foundIndexes.length, expectedIndexes.length, `Expected ${expectedIndexes.length} indexes, found ${foundIndexes.length}`);
+
+    // 3. Verify bounded column lengths for originalFilename and failureCode
+    const boundedColsRes = await client.query(`
+      SELECT table_name, column_name, data_type, character_maximum_length
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND (
+          (table_name = 'ManagedMedia' AND column_name IN ('originalFilename', 'failureCode'))
+          OR
+          (table_name = 'MediaProcessingRun' AND column_name = 'failureCode')
+        )
+      ORDER BY table_name, column_name;
+    `);
+    const boundedMap = new Map<string, number>();
+    for (const r of boundedColsRes.rows) {
+      boundedMap.set(`${r.table_name}.${r.column_name}`, r.character_maximum_length);
+    }
+    assert.strictEqual(boundedMap.get("ManagedMedia.originalFilename"), 255, "ManagedMedia.originalFilename must be VARCHAR(255)");
+    assert.strictEqual(boundedMap.get("ManagedMedia.failureCode"), 100, "ManagedMedia.failureCode must be VARCHAR(100)");
+    assert.strictEqual(boundedMap.get("MediaProcessingRun.failureCode"), 100, "MediaProcessingRun.failureCode must be VARCHAR(100)");
   });
 
   it("13. Phase 6 Task 7 CONTRACT: query plan sanity checks for critical operational indexes", async () => {
