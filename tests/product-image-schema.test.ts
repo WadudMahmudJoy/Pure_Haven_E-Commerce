@@ -1,26 +1,89 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import pg from "pg";
 
 const { Client } = pg;
 
 describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () => {
   let client: pg.Client;
+  let createdDisposableDbName: string | null = null;
+  let adminClient: pg.Client | null = null;
 
   before(async () => {
-    const dbUrl = process.env.DATABASE_URL;
-    if (!dbUrl) {
-      throw new Error("DATABASE_URL must be explicitly supplied by the guarded Task-1 harness");
+    let dbUrl = process.env.DATABASE_URL;
+    const testBaseUrl = process.env.DATABASE_URL_TEST;
+
+    // If DATABASE_URL is missing or not a disposable DB, create one using DATABASE_URL_TEST
+    if (!dbUrl || !/^pure_haven_storefront_gallery_[0-9]+/.test(new URL(dbUrl).pathname.replace(/^\//, ""))) {
+      if (!testBaseUrl) {
+        throw new Error("DATABASE_URL_TEST must be supplied to create disposable test database");
+      }
+      const parsedTest = new URL(testBaseUrl);
+      if (!["localhost", "127.0.0.1"].includes(parsedTest.hostname)) {
+        throw new Error("Safety violation: DATABASE_URL_TEST must target localhost/127.0.0.1");
+      }
+      const dbName = `pure_haven_storefront_gallery_${Date.now()}`;
+      createdDisposableDbName = dbName;
+      const adminUrl = testBaseUrl.replace(/\/[^/?]+(\?.*)?$/, "/postgres$1");
+      adminClient = new Client({ connectionString: adminUrl });
+      await adminClient.connect();
+      await adminClient.query(`CREATE DATABASE "${dbName}";`);
+
+      const disposableUrl = testBaseUrl.replace(/\/[^/?]+(\?.*)?$/, `/${dbName}$1`);
+      dbUrl = disposableUrl;
+
+      // Deploy migrations
+      const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+      const schemaPath = path.join(process.cwd(), "prisma", "schema.prisma");
+      execFileSync(npxCmd, ["prisma", "migrate", "deploy", "--schema", schemaPath], {
+        env: { ...process.env, DATABASE_URL: disposableUrl },
+        stdio: "pipe",
+        shell: process.platform === "win32",
+      });
+
+      // Connect client
+      client = new Client({ connectionString: dbUrl });
+      await client.connect();
+
+      // Seed required legacy fixtures
+      await client.query(`
+        INSERT INTO "Product" (id, name, price, image, category, "isActive", "createdAt", "updatedAt", "deletedAt")
+        VALUES
+          (1001, 'Task1 Active Product', 100, '/uploads/products/active.jpg', 'Skincare', true, NOW(), NOW(), NULL),
+          (1002, 'Task1 Inactive Product', 200, '/uploads/products/inactive.jpg', 'Skincare', false, NOW(), NOW(), NULL),
+          (1003, 'Task1 Soft-Deleted Product', 300, '/uploads/products/deleted.jpg', 'Skincare', true, NOW(), NOW(), NOW()),
+          (1004, 'Task1 Empty-Image Product', 400, '', 'Skincare', true, NOW(), NOW(), NULL)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      // Run backfill query for seeded fixtures
+      await client.query(`
+        INSERT INTO "ProductImage" ("productId", "url", "sortOrder", "createdAt", "updatedAt")
+        SELECT p."id", TRIM(p."image"), 1, NOW(), NOW()
+        FROM "Product" p
+        WHERE p."image" IS NOT NULL
+          AND TRIM(p."image") <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM "ProductImage" pi WHERE pi."productId" = p."id"
+          );
+      `);
+    } else {
+      client = new Client({ connectionString: dbUrl });
+      await client.connect();
     }
-    client = new Client({ connectionString: dbUrl });
-    await client.connect();
 
     const dbNameRes = await client.query("SELECT current_database() AS name");
     const currentDbName = dbNameRes.rows[0]?.name || "";
-    if (!/^pure_haven_storefront_gallery_[0-9]+$/.test(currentDbName)) {
+    if (!/^pure_haven_storefront_gallery_[0-9]+/.test(currentDbName)) {
       await client.end();
       throw new Error(
-        `Safety violation: tests/product-image-schema.test.ts can only execute against a disposable database matching '^pure_haven_storefront_gallery_[0-9]+$', but connected to '${currentDbName}'`
+        `Safety violation: tests/product-image-schema.test.ts can only execute against a disposable database matching '^pure_haven_storefront_gallery_[0-9]+', but connected to '${currentDbName}'`
       );
     }
 
@@ -46,6 +109,13 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
   after(async () => {
     if (client) {
       await client.end();
+    }
+    if (adminClient && createdDisposableDbName) {
+      try {
+        await adminClient.query(`DROP DATABASE IF EXISTS "${createdDisposableDbName}" WITH (FORCE);`);
+      } finally {
+        await adminClient.end();
+      }
     }
   });
 
@@ -156,8 +226,8 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
     `);
     assert.strictEqual(
       res.rows.length,
-      2,
-      `Expected exactly 2 indexes on ProductImage (pkey + unique), found ${res.rows.length}: ${(res.rows as Array<{ indexname: string }>).map((r) => r.indexname).join(", ")}`
+      3,
+      `Expected exactly 3 indexes on ProductImage (pkey + unique + managedMediaId), found ${res.rows.length}: ${(res.rows as Array<{ indexname: string }>).map((r) => r.indexname).join(", ")}`
     );
   });
 
@@ -262,5 +332,22 @@ describe("Task 1 — ProductImage Schema and Universal Backfill Contract", () =>
     assert.strictEqual(rerunResult.rowCount, 0, "Idempotent backfill must insert 0 rows");
     const afterCount = await client.query('SELECT count(*)::int AS count FROM "ProductImage"');
     assert.strictEqual(afterCount.rows[0].count, beforeCount.rows[0].count, "Total row count must remain unchanged");
+  });
+});
+
+describe("Phase 6 Task 4 — Additive EXPAND Persistence Schema Contract", () => {
+  it("verifies additive ManagedMedia, MediaProcessingRun, MediaObject models and ProductImage extensions", () => {
+    const schema = fs.readFileSync(path.resolve("prisma/schema.prisma"), "utf8");
+
+    assert.match(schema, /model ManagedMedia\s*\{/, "ManagedMedia model must exist in schema");
+    assert.match(schema, /model MediaProcessingRun\s*\{/, "MediaProcessingRun model must exist in schema");
+    assert.match(schema, /model MediaObject\s*\{/, "MediaObject model must exist in schema");
+    assert.match(schema, /sourceKind\s+ProductImageSourceKind\?/, "ProductImage.sourceKind must be nullable in EXPAND");
+    assert.match(schema, /managedMediaId\s+String\?/, "ProductImage.managedMediaId must be nullable in EXPAND");
+    assert.doesNotMatch(schema, /referenceCount|isAttached|ownerType\s+String/, "No referenceCount, isAttached, or polymorphic ownerType");
+
+    const mediaObjectMatch = schema.match(/model MediaObject\s*\{([\s\S]*?)\}/);
+    assert.ok(mediaObjectMatch, "MediaObject model block must be present");
+    assert.doesNotMatch(mediaObjectMatch[1], /managedMediaId/, "MediaObject must NOT have redundant direct managedMediaId");
   });
 });

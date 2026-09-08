@@ -160,15 +160,175 @@ model ProductVariant {
 }
 
 model ProductImage {
-  id        Int      @id @default(autoincrement())
-  productId Int
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  url       String
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             Int                     @id @default(autoincrement())
+  productId      Int
+  product        Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceKind     ProductImageSourceKind?
+  managedMediaId String?
+  managedMedia   ManagedMedia?           @relation(fields: [managedMediaId], references: [id], onDelete: Restrict)
+  url            String
+  altText        String?
+  sortOrder      Int                     @default(0)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
 
   @@unique([productId, sortOrder])
+  @@index([managedMediaId])
+}
+
+model ManagedMedia {
+  id                      String                     @id @default(uuid())
+  mediaType               ManagedMediaType           @default(IMAGE)
+  lifecycleState          ManagedMediaLifecycleState @default(PENDING)
+
+  ingestPurpose           MediaIngestPurpose         @default(PRODUCT_IMAGE)
+  ingestActorScope        String
+  ingestIdempotencyKey    String
+  ingestSha256            String
+  ingestByteSize          BigInt
+  ingestMimeType          String
+  originalFilename        String?
+  sourceWidth             Int?
+  sourceHeight            Int?
+
+  stagingProviderKey      String
+  stagingObjectKey        String
+  stagingState            MediaStagingState          @default(ALLOCATED)
+
+  activeProcessingRunId   String?
+  activeProcessingRun     MediaProcessingRun?        @relation("ManagedMediaActiveProcessingRun", fields: [activeProcessingRunId], references: [id], onDelete: SetNull)
+
+  canonicalMasterObjectId String?
+  canonicalMasterObject   MediaObject?               @relation("ManagedMediaCanonicalMasterObject", fields: [canonicalMasterObjectId], references: [id], onDelete: SetNull)
+
+  deliveryDisabledAt      DateTime?
+
+  unreferencedAt          DateTime?
+  cleanupEligibleAt       DateTime?
+  cleanupAttemptCount     Int                        @default(0)
+  cleanupLastAttemptAt    DateTime?
+
+  failurePhase            MediaFailurePhase?
+  failureCode             String?
+
+  deletedAt               DateTime?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  processingRuns          MediaProcessingRun[]       @relation("ManagedMediaProcessingRuns")
+  productImages           ProductImage[]
+
+  @@unique([ingestActorScope, ingestPurpose, ingestIdempotencyKey])
+  @@index([lifecycleState, cleanupEligibleAt])
+  @@index([lifecycleState, updatedAt])
+}
+
+model MediaProcessingRun {
+  id                    String                  @id @default(uuid())
+  managedMediaId        String
+  managedMedia          ManagedMedia            @relation("ManagedMediaProcessingRuns", fields: [managedMediaId], references: [id], onDelete: Cascade)
+
+  profileVersion        String
+  profileDefinitionHash String
+  state                 MediaProcessingRunState @default(PENDING)
+  attemptCount          Int                     @default(0)
+  startedAt             DateTime?
+  lastHeartbeatAt       DateTime?
+  leaseExpiresAt        DateTime?
+  failurePhase          MediaFailurePhase?
+  failureCode           String?
+  completedAt           DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  mediaObjects          MediaObject[]
+  activeForManagedMedia ManagedMedia[]          @relation("ManagedMediaActiveProcessingRun")
+
+  @@unique([managedMediaId, profileVersion])
+  @@index([state, leaseExpiresAt])
+  @@index([managedMediaId, state])
+}
+
+model MediaObject {
+  id                             String             @id @default(uuid())
+  processingRunId                String
+  processingRun                  MediaProcessingRun @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
+
+  role                           MediaObjectRole
+  accessClass                    MediaAccessClass
+  variantKey                     String
+  storageProviderKey             String
+  objectKey                      String
+  mimeType                       String
+  width                          Int
+  height                         Int
+  byteSize                       BigInt
+  checksumSha256                 String
+  verifiedAt                     DateTime?
+  deletedAt                      DateTime?
+  createdAt                      DateTime           @default(now())
+  updatedAt                      DateTime           @updatedAt
+
+  canonicalMasterForManagedMedia ManagedMedia[]     @relation("ManagedMediaCanonicalMasterObject")
+
+  @@unique([processingRunId, variantKey])
+  @@unique([storageProviderKey, objectKey])
+  @@index([processingRunId])
+}
+
+enum ProductImageSourceKind {
+  MANAGED
+  LEGACY_LOCAL
+  LEGACY_EXTERNAL
+}
+
+enum ManagedMediaType {
+  IMAGE
+}
+
+enum ManagedMediaLifecycleState {
+  PENDING
+  PROCESSING
+  READY
+  CLEANUP_PENDING
+  DELETING
+  DELETED
+  FAILED
+}
+
+enum MediaStagingState {
+  ALLOCATED
+  PRESENT
+  CLEANUP_PENDING
+  DELETED
+}
+
+enum MediaIngestPurpose {
+  PRODUCT_IMAGE
+}
+
+enum MediaFailurePhase {
+  INGEST
+  PROCESSING
+  STORAGE
+  CLEANUP
+}
+
+enum MediaProcessingRunState {
+  PENDING
+  PROCESSING
+  COMPLETE
+  FAILED
+}
+
+enum MediaObjectRole {
+  MASTER
+  RENDITION
+}
+
+enum MediaAccessClass {
+  PRIVATE_SOURCE
+  PUBLIC_DELIVERY
 }
 
 enum OrderStatus {

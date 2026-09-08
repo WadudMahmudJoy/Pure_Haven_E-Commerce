@@ -1,4 +1,4 @@
-﻿import dotenv from "dotenv";
+import dotenv from "dotenv";
 dotenv.config();
 
 import { describe, it, before, after } from "node:test";
@@ -377,11 +377,11 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
       SELECT indexname, indexdef FROM pg_indexes
       WHERE tablename = 'ProductImage' AND schemaname = 'public'
     `);
-    // Expected exactly 2 indexes: primary key (ProductImage_pkey) and unique constraint (ProductImage_productId_sortOrder_key)
+    // Expected exactly 3 indexes: primary key (ProductImage_pkey), unique constraint (ProductImage_productId_sortOrder_key), and managedMediaId foreign key index (ProductImage_managedMediaId_idx)
     assert.strictEqual(
       res.rows.length,
-      2,
-      `Expected exactly 2 indexes on ProductImage (pkey + unique), found ${res.rows.length}: ${res.rows.map((r: { indexname: string }) => r.indexname).join(", ")}`
+      3,
+      `Expected exactly 3 indexes on ProductImage (pkey + unique + managedMediaId), found ${res.rows.length}: ${res.rows.map((r: { indexname: string }) => r.indexname).join(", ")}`
     );
   });
 
@@ -514,5 +514,83 @@ describe("Task 10 — PostgreSQL Migration Rehearsal & Universal Backfill Verifi
       /No pending migrations to apply|applied/i,
       "Repeated migrate deploy must succeed cleanly"
     );
+  });
+
+  it("9. Phase 6 Task 4 EXPAND: additive tables, nullable columns, and backward compatibility", async () => {
+    // 1. Verify ManagedMedia, MediaProcessingRun, MediaObject tables exist
+    const tablesRes = await client.query(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('ManagedMedia', 'MediaProcessingRun', 'MediaObject')
+      ORDER BY table_name ASC
+    `);
+    const tableNames = tablesRes.rows.map((r: { table_name: string }) => r.table_name);
+    assert.deepStrictEqual(tableNames, ["ManagedMedia", "MediaObject", "MediaProcessingRun"]);
+
+    // 2. Verify ProductImage additive columns exist and are nullable in EXPAND
+    const colRes = await client.query(`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'ProductImage'
+        AND column_name IN ('sourceKind', 'managedMediaId', 'altText')
+    `);
+    const cols = Object.fromEntries(colRes.rows.map((r: { column_name: string; is_nullable: string }) => [r.column_name, r.is_nullable]));
+    assert.strictEqual(cols.sourceKind, "YES", "ProductImage.sourceKind must be nullable in EXPAND");
+    assert.strictEqual(cols.managedMediaId, "YES", "ProductImage.managedMediaId must be nullable in EXPAND");
+    assert.strictEqual(cols.altText, "YES", "ProductImage.altText must be nullable in EXPAND");
+
+    // 3. Verify all backfilled legacy rows have sourceKind IS NULL and managedMediaId IS NULL in EXPAND
+    const legacyImgRes = await client.query(`
+      SELECT id, "sourceKind", "managedMediaId", url
+      FROM "ProductImage"
+    `);
+    assert.ok(legacyImgRes.rows.length > 0, "Backfilled ProductImage rows must exist");
+    for (const row of legacyImgRes.rows) {
+      assert.strictEqual(row.sourceKind, null, "Historical ProductImage.sourceKind must be NULL in EXPAND");
+      assert.strictEqual(row.managedMediaId, null, "Historical ProductImage.managedMediaId must be NULL in EXPAND");
+    }
+
+    // 4. Verify foreign key constraints on additive schema
+    const fkRes = await client.query(`
+      SELECT
+        tc.table_name,
+        kcu.column_name,
+        ccu.table_name AS foreign_table_name,
+        ccu.column_name AS foreign_column_name,
+        rc.delete_rule
+      FROM information_schema.table_constraints AS tc
+      JOIN information_schema.key_column_usage AS kcu
+        ON tc.constraint_name = kcu.constraint_name
+      JOIN information_schema.constraint_column_usage AS ccu
+        ON ccu.constraint_name = tc.constraint_name
+      JOIN information_schema.referential_constraints AS rc
+        ON rc.constraint_name = tc.constraint_name
+      WHERE tc.constraint_type = 'FOREIGN KEY'
+    `);
+    interface FkInfo {
+      table_name: string;
+      column_name: string;
+      foreign_table_name: string;
+      foreign_column_name: string;
+      delete_rule: string;
+    }
+    const fks = fkRes.rows as FkInfo[];
+
+    const piFk = fks.find((f) => f.table_name === "ProductImage" && f.column_name === "managedMediaId");
+    assert.ok(piFk, "ProductImage.managedMediaId FK must exist");
+    assert.strictEqual(piFk.foreign_table_name, "ManagedMedia");
+    assert.strictEqual(piFk.delete_rule, "RESTRICT", "ProductImage -> ManagedMedia FK must be ON DELETE RESTRICT");
+
+    const runFk = fks.find((f) => f.table_name === "MediaProcessingRun" && f.column_name === "managedMediaId");
+    assert.ok(runFk, "MediaProcessingRun.managedMediaId FK must exist");
+    assert.strictEqual(runFk.foreign_table_name, "ManagedMedia");
+    assert.strictEqual(runFk.delete_rule, "CASCADE", "MediaProcessingRun -> ManagedMedia FK must be ON DELETE CASCADE");
+
+    const objFk = fks.find((f) => f.table_name === "MediaObject" && f.column_name === "processingRunId");
+    assert.ok(objFk, "MediaObject.processingRunId FK must exist");
+    assert.strictEqual(objFk.foreign_table_name, "MediaProcessingRun");
+    assert.strictEqual(objFk.delete_rule, "CASCADE", "MediaObject -> MediaProcessingRun FK must be ON DELETE CASCADE");
   });
 });
