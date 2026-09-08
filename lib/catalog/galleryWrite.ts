@@ -1,5 +1,8 @@
 import type { Prisma } from "../../generated/prisma/client";
-import { normalizeProductImageReference } from "./galleryPersistence";
+import {
+  normalizeProductImageReference,
+  classifyLegacyProductImageUrl,
+} from "./galleryPersistence";
 
 export type GalleryWriteIntent =
   | {
@@ -150,6 +153,7 @@ export async function applyGalleryMutation(
           productId,
           url: intent.images[i],
           sortOrder: i + 1,
+          sourceKind: classifyLegacyProductImageUrl(intent.images[i]),
         },
       });
     }
@@ -184,7 +188,10 @@ export async function applyGalleryMutation(
     if (pos1) {
       await tx.productImage.update({
         where: { id: pos1.id },
-        data: { url: intent.image },
+        data: {
+          url: intent.image,
+          sourceKind: classifyLegacyProductImageUrl(intent.image),
+        },
       });
     } else {
       await tx.productImage.create({
@@ -192,6 +199,7 @@ export async function applyGalleryMutation(
           productId,
           url: intent.image,
           sortOrder: 1,
+          sourceKind: classifyLegacyProductImageUrl(intent.image),
         },
       });
     }

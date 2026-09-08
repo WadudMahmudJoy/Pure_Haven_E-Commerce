@@ -288,4 +288,28 @@ describe("Task 3 — Admin Product Read Contract for Gallery", () => {
     assert.strictEqual(typeof detail.createdAt, "string");
     assert.strictEqual(typeof detail.updatedAt, "string");
   });
+
+  it("G. Bridge compatibility: ProductImage rows with null sourceKind read cleanly", async () => {
+    const bridgeProduct = await prisma.product.create({
+      data: {
+        name: "Bridge Null SourceKind Product",
+        price: 199,
+        image: "/uploads/products/bridge-null.jpg",
+        category: "Skincare",
+        images: {
+          create: [
+            { url: "/uploads/products/bridge-null.jpg", sortOrder: 1, sourceKind: null },
+            { url: "/images/secondary-bridge.jpg", sortOrder: 2, sourceKind: null },
+          ],
+        },
+      },
+    });
+
+    const detail = await getAdminProductDetailQuery(bridgeProduct.id);
+    assert.ok(detail);
+    assert.deepStrictEqual(detail.images, [
+      "/uploads/products/bridge-null.jpg",
+      "/images/secondary-bridge.jpg",
+    ]);
+  });
 });

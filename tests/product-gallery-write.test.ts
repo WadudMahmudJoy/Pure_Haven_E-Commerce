@@ -45,7 +45,11 @@ if (
 
 import crypto from "node:crypto";
 import type { PrismaClient } from "../generated/prisma/client";
-import { normalizeProductImageReference } from "../lib/catalog/galleryPersistence.js";
+import {
+  normalizeProductImageReference,
+  classifyLegacyProductImageUrl,
+  resolveBridgeSourceKind,
+} from "../lib/catalog/galleryPersistence.js";
 import { applyGalleryMutation } from "../lib/catalog/galleryWrite.js";
 
 describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
@@ -1172,6 +1176,49 @@ describe("Task 2 — Gallery Domain Validation + Write Authority", () => {
         return err instanceof Error || err instanceof TypeError;
       },
       "applyGalleryMutation must not silently succeed when tx.productImage is missing"
+    );
+  });
+});
+
+describe("Phase 6 Task 5 — Bridge Legacy Product Image Classification", () => {
+  it("classifies approved legacy local and external roots", () => {
+    assert.equal(classifyLegacyProductImageUrl("/uploads/products/a.jpg"), "LEGACY_LOCAL");
+    assert.equal(classifyLegacyProductImageUrl("/images/a.jpg"), "LEGACY_LOCAL");
+    assert.equal(classifyLegacyProductImageUrl("https://cdn.example.com/a.jpg"), "LEGACY_EXTERNAL");
+  });
+
+  it("rejects unsupported, insecure, or traversal references", () => {
+    assert.throws(
+      () => classifyLegacyProductImageUrl("http://example.com/a.jpg"),
+      /PRODUCT_IMAGE_REFERENCE_UNSUPPORTED/
+    );
+    assert.throws(
+      () => classifyLegacyProductImageUrl("data:image/png;base64,abc"),
+      /PRODUCT_IMAGE_REFERENCE_UNSUPPORTED/
+    );
+    assert.throws(
+      () => classifyLegacyProductImageUrl("blob:https://example.com/uuid"),
+      /PRODUCT_IMAGE_REFERENCE_UNSUPPORTED/
+    );
+    assert.throws(
+      () => classifyLegacyProductImageUrl("/other/path/a.jpg"),
+      /PRODUCT_IMAGE_REFERENCE_UNSUPPORTED/
+    );
+    assert.throws(
+      () => classifyLegacyProductImageUrl("/uploads/products/../secret.jpg"),
+      /PRODUCT_IMAGE_REFERENCE_UNSUPPORTED/
+    );
+  });
+
+  it("resolves bridge sourceKind for null and explicit sourceKind", () => {
+    assert.equal(resolveBridgeSourceKind({ sourceKind: "MANAGED", url: "/any.jpg" }), "MANAGED");
+    assert.equal(
+      resolveBridgeSourceKind({ sourceKind: null, url: "/uploads/products/a.jpg" }),
+      "LEGACY_LOCAL"
+    );
+    assert.equal(
+      resolveBridgeSourceKind({ sourceKind: null, url: "https://cdn.example.com/a.jpg" }),
+      "LEGACY_EXTERNAL"
     );
   });
 });

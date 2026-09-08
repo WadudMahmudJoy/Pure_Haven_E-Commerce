@@ -103,3 +103,5 @@ export type ParsedAdminCatalogParams = {
   q: string | null;
   skip: number;
 };
+
+export type { ProductImageSourceKind } from "../media/domain";

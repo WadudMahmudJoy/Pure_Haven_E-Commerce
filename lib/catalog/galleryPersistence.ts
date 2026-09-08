@@ -61,3 +61,26 @@ export function normalizeProductImageReference(value: unknown):
     error: `Invalid product image reference: '${trimmed}'. Approved paths must reside under /uploads/products/, /images/, or be valid HTTPS URLs.`,
   };
 }
+
+import type { ProductImageSourceKind } from "../media/domain";
+
+export function classifyLegacyProductImageUrl(url: string): "LEGACY_LOCAL" | "LEGACY_EXTERNAL" {
+  const norm = normalizeProductImageReference(url);
+  if (!norm.ok) {
+    throw new Error("PRODUCT_IMAGE_REFERENCE_UNSUPPORTED");
+  }
+  if (norm.url.startsWith("/uploads/products/") || norm.url.startsWith("/images/")) {
+    return "LEGACY_LOCAL";
+  }
+  if (norm.url.startsWith("https://")) {
+    return "LEGACY_EXTERNAL";
+  }
+  throw new Error("PRODUCT_IMAGE_REFERENCE_UNSUPPORTED");
+}
+
+export function resolveBridgeSourceKind(row: {
+  sourceKind: ProductImageSourceKind | null;
+  url: string;
+}): ProductImageSourceKind {
+  return row.sourceKind ?? classifyLegacyProductImageUrl(row.url);
+}
