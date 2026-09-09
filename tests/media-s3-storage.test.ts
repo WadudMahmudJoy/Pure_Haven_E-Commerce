@@ -15,7 +15,11 @@ import {
   type S3CompatibleStorageOptions,
   type AtomicS3Client,
 } from "../lib/media/storage/s3CompatibleMediaStorage";
-import { MediaStorageError, type PutImmutableInput } from "../lib/media/storage/contracts";
+import {
+  MediaStorageError,
+  type PutImmutableInput,
+  type StoredObjectMetadata,
+} from "../lib/media/storage/contracts";
 
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 
@@ -316,10 +320,56 @@ describe("S3CompatibleMediaStorage & Atomic Create Semantics", () => {
 
   // 4. Concurrency race safety
   describe("Concurrency Race Safety", () => {
-    it("simultaneous puts for same absent key with different content resolves with 1 winner and loser rejected", async () => {
+    it("CASE A — SAME KEY + SAME CONTENT/SHA: concurrent puts resolve with both operations fulfilling idempotently and zero overwrites", async () => {
       const fake = new FakeAtomicS3Client();
       const storage = new S3CompatibleMediaStorage(options, fake);
-      const key = "race/concurrent-put.bin";
+      const key = "race/concurrent-same-content.bin";
+
+      const bytes = new Uint8Array([10, 20, 30, 40, 50]);
+      const sha = computeSha256(bytes);
+
+      const [resA, resB] = await Promise.allSettled([
+        storage.putImmutable({
+          objectKey: key,
+          bytes,
+          contentType: "application/octet-stream",
+          checksumSha256: sha,
+        }),
+        storage.putImmutable({
+          objectKey: key,
+          bytes,
+          contentType: "application/octet-stream",
+          checksumSha256: sha,
+        }),
+      ]);
+
+      const fulfilled = [resA, resB].filter((r) => r.status === "fulfilled");
+      const rejected = [resA, resB].filter((r) => r.status === "rejected");
+
+      assert.strictEqual(fulfilled.length, 2, "Both concurrent operations must succeed");
+      assert.strictEqual(rejected.length, 0, "Neither operation should reject");
+
+      const metaA = (resA as PromiseFulfilledResult<StoredObjectMetadata>).value;
+      const metaB = (resB as PromiseFulfilledResult<StoredObjectMetadata>).value;
+      assert.strictEqual(metaA.objectKey, key);
+      assert.strictEqual(metaB.objectKey, key);
+      assert.strictEqual(metaA.checksumSha256, sha);
+      assert.strictEqual(metaB.checksumSha256, sha);
+      assert.strictEqual(metaA.byteSize, BigInt(bytes.byteLength));
+      assert.strictEqual(metaB.byteSize, BigInt(bytes.byteLength));
+
+      // Assert no unconditional overwrite occurred
+      assert.strictEqual(fake.unconditionalPutCount, 0, "No unconditional overwrite occurred");
+
+      // Verify stored bytes match expected
+      const stored = await storage.getObject(key);
+      assert.deepStrictEqual(Buffer.from(stored), Buffer.from(bytes));
+    });
+
+    it("CASE B — SAME KEY + DIFFERENT CONTENT/SHA: concurrent puts resolve with 1 winner and loser rejected with conflict", async () => {
+      const fake = new FakeAtomicS3Client();
+      const storage = new S3CompatibleMediaStorage(options, fake);
+      const key = "race/concurrent-diff-content.bin";
 
       const bytesA = new Uint8Array([1, 3, 5, 7, 9]);
       const bytesB = new Uint8Array([2, 4, 6, 8, 10]);
@@ -352,9 +402,9 @@ describe("S3CompatibleMediaStorage & Atomic Create Semantics", () => {
       );
 
       const stored = await storage.getObject(key);
-      const winner = (fulfilled[0] as PromiseFulfilledResult<import("../lib/media/storage/contracts").StoredObjectMetadata>).value;
+      const winner = (fulfilled[0] as PromiseFulfilledResult<StoredObjectMetadata>).value;
       assert.strictEqual(computeSha256(stored), winner.checksumSha256);
-      assert.strictEqual(fake.unconditionalPutCount, 0);
+      assert.strictEqual(fake.unconditionalPutCount, 0, "No unconditional overwrite occurred");
     });
   });
 });
