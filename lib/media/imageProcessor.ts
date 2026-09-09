@@ -314,20 +314,99 @@ export class DefaultImageProcessor implements ImageProcessor {
       sha256: masterSha256,
     };
 
+    const renditions = await this.generateDeliveryRenditions(
+      {
+        bytes: canonicalMaster.bytes,
+        mimeType: canonicalMaster.mimeType,
+        width: canonicalMaster.width,
+        height: canonicalMaster.height,
+        sha256: canonicalMaster.sha256,
+      },
+      profile
+    );
+
     return {
       canonicalMaster,
-      renditions: [],
+      renditions,
     };
   }
 
   async generateDeliveryRenditions(
-    _master: CanonicalMasterInput,
-    _profile: ProductImageProcessingProfile
+    master: CanonicalMasterInput,
+    profile: ProductImageProcessingProfile
   ): Promise<readonly ProcessedMediaObject[]> {
-    void _master;
-    void _profile;
-    return [];
+    const targetWidths = selectUsefulRenditionWidths(master.width, profile.widths);
+    const renditions: ProcessedMediaObject[] = [];
+
+    for (const width of targetWidths) {
+      // 1. WebP rendition (mandatory baseline)
+      const webpPipeline = sharp(master.bytes).resize({
+        width,
+        fit: "inside",
+        withoutEnlargement: true,
+      }).webp({ quality: profile.webpQuality });
+
+      const webpBuffer = await webpPipeline.toBuffer();
+      const webpMeta = await sharp(webpBuffer).metadata();
+      const webpBytes = new Uint8Array(webpBuffer);
+      const webpSha = createHash("sha256").update(webpBytes).digest("hex");
+
+      renditions.push({
+        role: "RENDITION",
+        accessClass: "PUBLIC_DELIVERY",
+        variantKey: `webp-${width}`,
+        bytes: webpBytes,
+        mimeType: "image/webp",
+        width: webpMeta.width ?? width,
+        height: webpMeta.height!,
+        sha256: webpSha,
+      });
+
+      // 2. AVIF rendition (conditional on profile)
+      if (profile.enabledDeliveryFormats.includes("avif")) {
+        const avifPipeline = sharp(master.bytes).resize({
+          width,
+          fit: "inside",
+          withoutEnlargement: true,
+        }).avif({ quality: profile.avifQuality ?? 65 });
+
+        const avifBuffer = await avifPipeline.toBuffer();
+        const avifMeta = await sharp(avifBuffer).metadata();
+        const avifBytes = new Uint8Array(avifBuffer);
+        const avifSha = createHash("sha256").update(avifBytes).digest("hex");
+
+        renditions.push({
+          role: "RENDITION",
+          accessClass: "PUBLIC_DELIVERY",
+          variantKey: `avif-${width}`,
+          bytes: avifBytes,
+          mimeType: "image/avif",
+          width: avifMeta.width ?? width,
+          height: avifMeta.height!,
+          sha256: avifSha,
+        });
+      }
+    }
+
+    return renditions;
   }
+}
+
+export function selectUsefulRenditionWidths(
+  masterWidth: number,
+  profileWidths: readonly number[]
+): number[] {
+  const sorted = [...profileWidths].sort((a, b) => a - b);
+  const strictlySmaller = sorted.filter((w) => w < masterWidth);
+  const exactMatch = sorted.find((w) => w === masterWidth);
+  if (exactMatch !== undefined) {
+    return [...strictlySmaller, exactMatch];
+  }
+  const maxWidth = sorted[sorted.length - 1] ?? 2048;
+  if (masterWidth <= maxWidth) {
+    return [...strictlySmaller, masterWidth];
+  }
+  return strictlySmaller;
 }
 
 export const defaultImageProcessor = new DefaultImageProcessor();
