@@ -419,15 +419,19 @@ it("Task 9 — PUT /api/products Blocks Deletion of Variant with FULFILLED Reser
 it("Task 9 — DELETE /api/products Permits Deletion When Only RELEASED Reservations Exist", async () => {
   const originalProductFindUnique = prisma.product.findUnique;
   const originalReservationCount = prisma.inventoryReservation.count;
-  const originalProductDelete = prisma.product.delete;
+  const originalProductImageFindMany = prisma.productImage.findMany;
+  const original$transaction = prisma.$transaction;
 
   test.after(() => {
     prisma.product.findUnique = originalProductFindUnique;
     prisma.inventoryReservation.count = originalReservationCount;
-    prisma.product.delete = originalProductDelete;
+    prisma.productImage.findMany = originalProductImageFindMany;
+    prisma.$transaction = original$transaction;
   });
 
-  let deleteCalled = false;
+  let txCallbackEntered = false;
+  const txProductDeleteCalls: any[] = [];
+
   (prisma.product.findUnique as any) = async () => ({
     id: 40,
     name: "Archived Cleanser",
@@ -445,9 +449,19 @@ it("Task 9 — DELETE /api/products Permits Deletion When Only RELEASED Reservat
     return 5; // Has RELEASED reservations
   };
 
-  (prisma.product.delete as any) = async () => {
-    deleteCalled = true;
-    return { id: 40 };
+  (prisma.productImage.findMany as any) = async () => [];
+
+  (prisma.$transaction as any) = async (callback: (tx: any) => Promise<any>) => {
+    txCallbackEntered = true;
+    const mockTx: any = {
+      product: {
+        delete: async (args: any) => {
+          txProductDeleteCalls.push(args);
+          return { id: 40 };
+        },
+      },
+    };
+    return await callback(mockTx);
   };
 
   const req = makeAdminRequest("http://localhost:3000/api/products?id=40", "DELETE");
@@ -456,7 +470,14 @@ it("Task 9 — DELETE /api/products Permits Deletion When Only RELEASED Reservat
 
   assert.strictEqual(res.status, 200, "Product with ONLY RELEASED reservations should be deletable");
   assert.strictEqual(data.success, true);
-  assert.strictEqual(deleteCalled, true);
+  assert.strictEqual(data.softDeleted, false);
+  assert.strictEqual(txCallbackEntered, true, "Transaction callback must be entered");
+  assert.strictEqual(txProductDeleteCalls.length, 1, "tx.product.delete must be called exactly once");
+  assert.deepStrictEqual(
+    txProductDeleteCalls[0],
+    { where: { id: 40 } },
+    "tx.product.delete must receive where: { id: 40 }"
+  );
 });
 
 it("Task 9 — POST /api/products Normalizes Prices and Rejects Non-Finite Prices", async () => {
