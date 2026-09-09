@@ -1,0 +1,46 @@
+{
+  "generatedAt": "2026-09-09T15:25:21.435Z",
+  "totalFixtures": 5,
+  "fixtures": [
+    {
+      "name": "photo",
+      "sourceBytes": 27686,
+      "webpBytes": 5784,
+      "avifBytes": 4349,
+      "dimensions": "800x800",
+      "visualStatus": "VERIFIED_SHARP_OPTIMIZED"
+    },
+    {
+      "name": "text-packaging",
+      "sourceBytes": 30795,
+      "webpBytes": 7558,
+      "avifBytes": 5727,
+      "dimensions": "800x800",
+      "visualStatus": "VERIFIED_SHARP_OPTIMIZED"
+    },
+    {
+      "name": "fine-texture",
+      "sourceBytes": 28857,
+      "webpBytes": 6758,
+      "avifBytes": 5249,
+      "dimensions": "800x800",
+      "visualStatus": "VERIFIED_SHARP_OPTIMIZED"
+    },
+    {
+      "name": "dark-gradient",
+      "sourceBytes": 29317,
+      "webpBytes": 6624,
+      "avifBytes": 4858,
+      "dimensions": "800x800",
+      "visualStatus": "VERIFIED_SHARP_OPTIMIZED"
+    },
+    {
+      "name": "transparent",
+      "sourceBytes": 29143,
+      "webpBytes": 6844,
+      "avifBytes": 5235,
+      "dimensions": "800x800",
+      "visualStatus": "VERIFIED_SHARP_OPTIMIZED"
+    }
+  ]
+}

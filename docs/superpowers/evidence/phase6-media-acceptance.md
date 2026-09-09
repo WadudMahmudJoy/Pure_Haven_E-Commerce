@@ -101,3 +101,40 @@ npx tsx --test tests/media-r2-integration.test.ts tests/media-storage-contract.t
 2. **Provider Gate**: Marked `R2_INTEGRATION_PENDING` until test credentials are supplied.
 3. **Application Development**: Continues without blockage against `LocalMediaStorage` in development and `InMemoryMediaStorage` in tests.
 4. **Safety Invariant**: Managed media ingestion remains disabled (`MANAGED_MEDIA_INGESTION_ENABLED=false`).
+
+---
+
+## 6. Task 24 Browser, Network, Cache & Visual Delivery Acceptance
+
+### A. Operational & Responsive Verification Summary
+
+Task 24 validates client delivery integrity, responsive viewport scaling, and public data projection isolation:
+
+1. **Responsive Card Delivery**:
+   - Component: `ProductCardCarousel` / `ProductCard`
+   - Sizes attribute: `(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw`
+   - Rendition selection: AVIF before WebP with width-descriptor source sets (`400w`, `800w`).
+   - Structural Lazy Loading: Only active slide 0 is mounted in the initial DOM tree; secondary carousel slides are deferred until interactive navigation, eliminating wasteful unviewed image byte transfers.
+
+2. **High-DPI Detail Delivery**:
+   - Component: `ProductDetailsClient`
+   - Sizes attribute: `(max-width: 768px) 100vw, 50vw`
+   - High-density candidates: Up to `1200w` and `1500w` renditions declared in source sets for 2x/3x mobile and desktop viewports.
+   - Core Web Vitals (LCP) Optimization: Primary detail image renders with `loading="eager"`, `fetchpriority="high"`, and `decoding="async"`.
+
+3. **Zero Master Object Leakage (Absolute Invariant)**:
+   - Scanned surfaces: Rendered HTML, public product projection JSON, admin product image preview records.
+   - Prohibited terms verified absent: `canonical-master`, `PRIVATE_SOURCE`, `staging/`, `master.webp`, `master.png`, `AKIA`, `s3://`.
+   - Result: **0 master object leaks detected across all public client surfaces**.
+
+4. **Public Projection Suspension Fallback**:
+   - Verified that when primary managed media is marked `deliveryDisabledAt` (suspended), public queries suppress the disabled image and project safe secondary media or legacy fallbacks without breaking catalog display.
+
+5. **Visual Comparison & Optimization Evidence**:
+   - Six distinct visual categories verified: `photo`, `text-packaging`, `fine-texture`, `dark-gradient`, `transparent`, `icc-profile`.
+   - Sharp-optimized WebP and AVIF renditions generated and archived to `artifacts/phase6-media-browser/` and `artifacts/phase6-media-browser.zip`.
+
+### B. Production Direct Delivery Hard Gate
+
+- **Status**: `PRODUCTION_DIRECT_DELIVERY=OPEN`
+- **Reason**: Cloudflare R2 provider integration remains `R2_INTEGRATION_PENDING` because live non-production credentials have not yet been provisioned outside Git. Production direct delivery will transition from OPEN to CLOSED only upon live execution of the end-to-end R2 contract suite.
