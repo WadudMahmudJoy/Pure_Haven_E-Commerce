@@ -76,8 +76,12 @@ describe("Task 16: Authenticated Managed Upload API & Status Contract", () => {
         where: { ingestActorScope: { in: actorScopes } },
         data: { activeProcessingRunId: null, canonicalMasterObjectId: null },
       });
-      await prisma.mediaObject.deleteMany({});
-      await prisma.mediaProcessingRun.deleteMany({});
+      await prisma.mediaObject.deleteMany({
+        where: { processingRun: { managedMedia: { ingestActorScope: { in: actorScopes } } } },
+      });
+      await prisma.mediaProcessingRun.deleteMany({
+        where: { managedMedia: { ingestActorScope: { in: actorScopes } } },
+      });
       await prisma.managedMedia.deleteMany({
         where: { ingestActorScope: { in: actorScopes } },
       });

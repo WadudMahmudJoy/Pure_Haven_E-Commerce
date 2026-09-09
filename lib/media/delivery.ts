@@ -1,4 +1,5 @@
 import type { MediaDeliveryResolver } from "./publicMediaDto";
+export type { MediaDeliveryResolver };
 
 export function assertPublicObjectKey(objectKey: string): void {
   if (!objectKey || !/^[a-zA-Z0-9/_\-.]+$/.test(objectKey) || objectKey.includes("..")) {

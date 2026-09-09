@@ -50,9 +50,17 @@ describe("Task 15: Durable ManagedMedia Ingestion & Private Staging", () => {
   after(async () => {
     if (prisma) {
       // Clean up records created by this test run
-      await prisma.mediaObject.deleteMany({});
-      await prisma.mediaProcessingRun.deleteMany({});
       await prisma.productImage.deleteMany({
+        where: { managedMedia: { ingestActorScope: actorScope } },
+      });
+      await prisma.managedMedia.updateMany({
+        where: { ingestActorScope: actorScope },
+        data: { canonicalMasterObjectId: null, activeProcessingRunId: null },
+      });
+      await prisma.mediaObject.deleteMany({
+        where: { processingRun: { managedMedia: { ingestActorScope: actorScope } } },
+      });
+      await prisma.mediaProcessingRun.deleteMany({
         where: { managedMedia: { ingestActorScope: actorScope } },
       });
       await prisma.managedMedia.deleteMany({
