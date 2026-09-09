@@ -1,22 +1,29 @@
 # Phase 6 Media Infrastructure — Acceptance & Provider Capability Evidence
 
-**Document Status:** Task 11 Execution Artifact  
-**Date:** 2026-09-09  
-**Specification:** `docs/superpowers/specs/2026-09-04-phase-6-media-infrastructure-design.md`  
-**Plan:** `docs/superpowers/plans/2026-09-05-phase-6-media-infrastructure.md`  
-**Task Classification:** `R2_INTEGRATION_PENDING`
+**Document Status:** Task 11 / Task 25 Verified Acceptance Evidence
+**Date:** 2026-09-10
+**Specification:** `docs/superpowers/specs/2026-09-04-phase-6-media-infrastructure-design.md`
+**Plan:** `docs/superpowers/plans/2026-09-05-phase-6-media-infrastructure.md`
+**Provider Gate Status:** `REAL_PROVIDER_GREEN`
+**R2 Integration Pending:** `CLOSED / GREEN`
+**Owner Manual Gate:** `PASS`
+**Task 25 Classification:** `IMPLEMENTATION_READY`
+**Task 26 Status:** `NOT AUTHORIZED`
 
 ---
 
 ## 1. Executive Summary & Result Classification
 
-Task 11 evaluates the suitability of Cloudflare R2 as the production storage backend candidate for Pure Haven BD.
+Task 11 and Task 25 evaluate the suitability of Cloudflare R2 as the production storage backend candidate and establish final implementation readiness for Pure Haven BD.
 
-### Status: `R2_INTEGRATION_PENDING`
+### Provider Status: `REAL_PROVIDER_GREEN` (R2_INTEGRATION_PENDING: CLOSED)
 
-- **Reason**: Live isolated non-production R2 test credentials and buckets (`PHASE6_R2_*`) have not been provisioned in the process environment by the technical owner.
-- **Strict Adherence**: Per the approved plan, no credentials were fabricated, no production resources were altered or contacted, and no simulated live evidence was asserted.
-- **Provider Independence**: The core media infrastructure remains 100% provider-neutral. Both `InMemoryMediaStorage` and `LocalMediaStorage` are fully operational and verified, and `S3CompatibleMediaStorage` is fully compiled and tested against atomic S3-compatible protocol specifications.
+- **Owner-Executed Proof**: Live isolated non-production R2 test credentials and buckets were supplied and verified by the technical owner:
+  - Full Provider Contract: 24/24 tests passed (exit 0).
+  - Live Public Development Delivery: 1/1 test passed (exit 0, HTTP 200, WebP MIME, body SHA-256 match, `NONPROD_DIRECT_DELIVERY_CACHE = GREEN`).
+- **LIST Status**: `NOT_PART_OF_INTERFACE` (Architectural invariant: normal catalog read paths make zero provider API calls; `MediaStorage` deliberately excludes `LIST`).
+- **Provider Independence**: The core media infrastructure remains 100% provider-neutral. Both `InMemoryMediaStorage` and `LocalMediaStorage` are fully operational and verified, and `S3CompatibleMediaStorage` is verified against Cloudflare R2 atomic protocol specifications.
+- **Production Delivery**: Preserved separately as `PRODUCTION_DIRECT_DELIVERY=OPEN` (custom domain and edge CDN deferred to Task 26).
 
 ---
 
@@ -61,18 +68,22 @@ The `S3CompatibleMediaStorage` adapter relies exclusively on standard S3 operati
 
 ## 3. Real-Credential & Resource Gate Status
 
-### Required Environment Prerequisites
-When the human owner authorizes real R2 integration testing, the following variables must be supplied outside Git:
+### Required Environment Prerequisites & Evidence Provenance
+When the human technical owner authorized and executed real R2 integration testing from an isolated PowerShell session containing non-production test credentials, the following variables were verified and exercised:
 
-| Variable | Description | Current Status |
+| Variable | Description | Owner Test Execution Status |
 | :--- | :--- | :--- |
-| `PHASE6_R2_ENDPOINT` | Cloudflare R2 Account S3 endpoint (`https://<account_id>.r2.cloudflarestorage.com`) | **MISSING** |
-| `PHASE6_R2_ACCESS_KEY_ID` | Isolated test R2 token Access Key ID | **MISSING** |
-| `PHASE6_R2_SECRET_ACCESS_KEY` | Isolated test R2 token Secret Access Key | **MISSING** |
-| `PHASE6_R2_PRIVATE_BUCKET` | Isolated non-production bucket for private masters | **MISSING** |
-| `PHASE6_R2_PUBLIC_BUCKET` | Isolated non-production bucket for public renditions | **MISSING** |
+| `PHASE6_R2_ENDPOINT` | Cloudflare R2 Account S3 endpoint (`https://<account_id>.r2.cloudflarestorage.com`) | **VERIFIED (OWNER-EXECUTED)** |
+| `PHASE6_R2_ACCESS_KEY_ID` | Isolated test R2 token Access Key ID | **VERIFIED (OWNER-EXECUTED)** |
+| `PHASE6_R2_SECRET_ACCESS_KEY` | Isolated test R2 token Secret Access Key | **VERIFIED (OWNER-EXECUTED)** |
+| `PHASE6_R2_PRIVATE_BUCKET` | Isolated non-production bucket for private masters | **VERIFIED (OWNER-EXECUTED)** |
+| `PHASE6_R2_PUBLIC_BUCKET` | Isolated non-production bucket for public renditions | **VERIFIED (OWNER-EXECUTED)** |
+| `PHASE6_R2_PUBLIC_DELIVERY_URL` | Isolated non-production public development delivery URL | **VERIFIED (OWNER-EXECUTED)** |
 
-Because these variables are absent, the provider integration suite (`tests/media-r2-integration.test.ts`) executed in diagnostic mode and recorded `R2_INTEGRATION_PENDING`.
+- **Owner-Executed Full Contract**: `24 / 24` passed (exit 0). Proves PUT, HEAD, GET, SHA256 integrity, DELETE, missing DELETE idempotency, concurrent create-if-absent, private master HTTP rejection, and point-operation cleanup.
+- **Owner-Executed Public Delivery**: `1 / 1` passed (exit 0). Anonymous HTTP GET returned status 200, WebP MIME, body SHA-256 match, and cache header `public, max-age=31536000, immutable` (`NONPROD_DIRECT_DELIVERY_CACHE = GREEN`).
+- **LIST Semantics**: `NOT_PART_OF_INTERFACE` (Architectural invariant: normal catalog read paths make zero provider API calls; `MediaStorage` deliberately excludes `LIST`).
+- **Agent Environment Diagnostic State**: In the credentialless Antigravity environment, `tests/media-r2-integration.test.ts` executes safely in diagnostic mode (2 tests pass, exit 0).
 
 ---
 
@@ -80,13 +91,14 @@ Because these variables are absent, the provider integration suite (`tests/media
 
 ### A. Test Execution
 ```powershell
+# Real R2 provider integration (executed by human owner with isolated credentials)
 npx tsx --test tests/media-r2-integration.test.ts tests/media-storage-contract.test.ts tests/media-local-storage.test.ts tests/media-s3-storage.test.ts
 ```
-- `tests/media-r2-integration.test.ts`: **PASS** (1 test, verifying pending state safely).
+- `tests/media-r2-integration.test.ts`: **PASS** (Owner-executed live R2: 24 contract tests + 1 public delivery test; CI/agent: 2 diagnostic tests pass safely).
 - `tests/media-storage-contract.test.ts`: **PASS** (10/10 contract tests).
 - `tests/media-local-storage.test.ts`: **PASS** (20/20 local storage & isolation tests).
 - `tests/media-s3-storage.test.ts`: **PASS** (19/19 S3 adapter & atomic create tests).
-- **Total Storage Tests**: 50 tests, 0 failures.
+- **Total Storage Tests**: 74 tests (all passed, 0 failures).
 
 ### B. Static Checks
 - `npx tsc --noEmit`: **0 errors** (clean compile).
@@ -137,7 +149,7 @@ Task 24 validates client delivery integrity, responsive viewport scaling, and pu
 ### B. Production Direct Delivery Hard Gate
 
 - **Status**: `PRODUCTION_DIRECT_DELIVERY=OPEN`
-- **Reason**: Cloudflare R2 provider integration remains `R2_INTEGRATION_PENDING` because live non-production credentials have not yet been provisioned outside Git. Production direct delivery will transition from OPEN to CLOSED only upon live execution of the end-to-end R2 contract suite.
+- **Reason**: Non-production direct delivery on Cloudflare R2 development domain (`r2.dev`) was successfully verified with status 200, WebP MIME, body SHA-256 match, and `NONPROD_DIRECT_DELIVERY_CACHE = GREEN`. However, the production direct delivery custom domain (`media.purehavenbd.com`), Cloudflare CDN edge distribution rules, and production bucket activation remain unconfigured and deferred to Task 26. This gate remains OPEN as a downstream rollout blocker without obstructing implementation readiness.
 
 ---
 
@@ -370,7 +382,7 @@ Detailed inspection of the 8 real-browser viewport screenshots in `artifacts/pha
 - **Provider Neutrality**: Neutral `storageProviderKey` strings; immutable object keys based on SHA-256 and object role; zero Cloudflare-specific schema constructs.
 - **Disaster Recovery Model**: PostgreSQL metadata + private canonical masters + deterministic processing profile version/hash enables 100% automated regeneration of public delivery renditions.
 - **Provider Migration Protocol**: Documented five-stage migration runbook: `COPY → VERIFY → CUTOVER → SOAK → RETIRE` (`docs/superpowers/evidence/phase6-media-operations-runbook.md`).
-- **Cloudflare R2 Status**: `R2_INTEGRATION_PENDING` — live isolated non-production credentials not yet provisioned; no simulated live proof claimed.
+- **Cloudflare R2 Status**: `REAL_PROVIDER_GREEN` — owner-executed live non-production contract (24/24 pass) and live public development delivery proof (1/1 pass, status 200, WebP MIME, byte SHA-256 match, `NONPROD_DIRECT_DELIVERY_CACHE = GREEN`); `R2_INTEGRATION_PENDING: CLOSED`.
 
 ---
 
@@ -394,7 +406,7 @@ Detailed inspection of the 8 real-browser viewport screenshots in `artifacts/pha
 - **Exit Code**: 0
 - **Duration**: 46022.8086ms (~46.0s)
 - **Summary**: 19 test files / 34 runner-reported suites / 196 tests (all passed, exit code 0)
-- **R2 Diagnostic Suite**: `tests/media-r2-integration.test.ts` passed in diagnostic mode recording `R2_INTEGRATION_PENDING`.
+- **R2 Diagnostic Suite**: `tests/media-r2-integration.test.ts` executed with 2 diagnostic tests passing in credentialless mode; live provider capabilities verified by owner with 24 contract tests + 1 public delivery test passing (exit 0).
 
 #### 3. Real Browser QA Suite (Task 24 CDP)
 - **Command**: `npx tsx --test --test-concurrency=1 tests/media-real-browser-qa.test.ts`
@@ -456,21 +468,25 @@ The complete visual and network evidence bundle is packaged and verified at:
 ### I. Phase 6 Final Readiness Classification
 
 ```text
-TASK 25 CLASSIFICATION: NOT_READY
-REASON: REAL_PROVIDER_INTEGRATION_PENDING
+TASK 25 CLASSIFICATION: IMPLEMENTATION_READY
+OWNER_MANUAL_ACCEPTANCE: APPROVED
+PRODUCTION_ACTIVATION_STATUS: OPEN
 ```
 
-**Persistence & Rollout Readiness Distinction**:
-- **Persistence Contract (Local / Implemented)**: **PASS**
-- **Shared Migration / Rollout Readiness**: **BLOCKED / INCIDENT-AWARE** (due to `MISMATCH_UNRESOLVED` and `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT`)
+**Readiness Basis (Governing Spec & Plan Rules)**:
+- **Specification Section 21.2**: *"Phase 6 IMPLEMENTATION READY may be declared when: implementation is complete; disposable/local migration paths are green; isolated real-provider integration is green; automated/lifecycle/race/security tests are green; browser/network QA is green; premium visual QA is green; code review/secret scans are clean; shared rollout may still be intentionally blocked. This status does not imply managed media is live in production."*
+- **Plan Task 25 Step 4**: *"`IMPLEMENTATION_READY` requires all implementation-level evidence green; production/provider/shared-migration gates may remain separately open only under the approved status distinction."*
+- **Plan Task 25 Step 7**: *"If owner approves and all implementation gates are green, record `PHASE 6 IMPLEMENTATION READY`. Record: `OWNER_MANUAL_ACCEPTANCE=APPROVED`, `PHASE6_IMPLEMENTATION_STATUS=IMPLEMENTATION_READY`, `PRODUCTION_ACTIVATION_STATUS=OPEN`."*
 
 **Owner Manual Review Gate**:
-- **Status**: `OWNER_MANUAL_GATE = PASS` (Confirmed by human technical owner)
+- **Status**: `OWNER_MANUAL_GATE = PASS` (Explicitly approved by human technical owner).
 
-**Active Hard Gates Summary (Remaining Blockers)**:
-1. `REAL_PROVIDER_INTEGRATION_PENDING`: Live non-production Cloudflare R2 credentials/buckets not yet provisioned; implementation is verified against local and S3-compatible abstractions.
-2. `PRODUCTION_DIRECT_DELIVERY=OPEN`: Production custom delivery domain and CDN edge distribution pending provider provisioning.
-3. `MISMATCH_UNRESOLVED`: Historical migration `20260526183231_sync_current_schema_security_fix` checksum mismatch on shared Neon remains open.
-4. `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT`: FIVE PHASE-6 MIGRATIONS were applied early to shared Neon; schema is consistent and untouched.
+**Remaining Implementation Blockers**:
+- **NONE** (All 5 acceptance dimensions, local migrations, contracts, browser/network QA, visual QA, and real provider capability gates are fully satisfied).
+
+**Downstream Task-26 Shared / Production Rollout Blockers**:
+1. `PRODUCTION_DIRECT_DELIVERY=OPEN`: **TASK26_SHARED_PRODUCTION_ROLLOUT_BLOCKER** — Production custom delivery domain (`media.purehavenbd.com`), Cloudflare CDN edge distribution rules, and production bucket activation pending production deployment.
+2. `MISMATCH_UNRESOLVED`: **TASK26_SHARED_PRODUCTION_ROLLOUT_BLOCKER** — Historical migration `20260526183231_sync_current_schema_security_fix` checksum mismatch on shared Neon remains open.
+3. `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT`: **TASK26_SHARED_PRODUCTION_ROLLOUT_BLOCKER** — FIVE PHASE-6 MIGRATIONS were applied early to shared Neon; schema is consistent (`INCIDENT_SCHEMA_CONSISTENT`); zero shared DB mutations executed.
 
 **Phase 6 Rollout Status**: Production rollout and Task 26 remain **NOT AUTHORIZED**.
