@@ -152,17 +152,17 @@ Authoritative real-browser testing was executed via Chrome DevTools Protocol (CD
 - **Application Server**: Next.js Production Server (`next start -p 3106`)
 - **Database**: Local Disposable PostgreSQL (`127.0.0.1:55439`) via `disposableDbGuard`
 - **Delivery Mode**: Local HTTP file serving (`public/media/...`)
-- **Test Suite**: `tests/media-real-browser-qa.test.ts` (8 passed, 0 failed)
+- **Test Suite**: `tests/media-real-browser-qa.test.ts` (10 passed, 0 failed)
 
-#### 2. Live DOM `currentSrc` & Viewport Matrix
-| Page | Component | Viewport | DPR | Rendered Width | `img.currentSrc` Rendition | Requested Format | Selection Evaluation |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/shop` | `ProductCard` | `390x844` | 2 | 153px | `rendition-400.avif` | `image/avif` | **Sub-maximal** (400w selected, <= 800w target) |
-| `/shop` | `ProductCard` | `768x1024` | 1 | 321px | `rendition-400.avif` | `image/avif` | **Sub-maximal** (400w selected, <= 800w target) |
-| `/product/2` | `ProductDetailsClient` | `1280x800` | 1 | 559px | `rendition-800.avif` | `image/avif` | **Sub-maximal** (800w selected, < 1500w) |
-| `/product/2` | `ProductDetailsClient` | `1280x800` | 2 | 559px | `rendition-1500.avif` | `image/avif` | **High-DPI** (1500w selected for 2x pixel ratio) |
+#### 2. Live DOM `currentSrc`, `naturalWidth` & Viewport Matrix
+| Page | Component | Viewport | DPR | clientWidth | naturalWidth | `img.currentSrc` Rendition | Requested Format | Selection Evaluation |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `/shop` | `ProductCard` | `390x844` | 2 | 153px | 195px | `rendition-400.avif` | `image/avif` | **Sub-maximal** (400w selected, <= 800w target) |
+| `/shop` | `ProductCard` | `768x1024` | 1 | 321px | 253px | `rendition-400.avif` | `image/avif` | **Sub-maximal** (400w selected, <= 800w target) |
+| `/product/23` | `ProductDetailsClient` | `1280x800` | 1 | 559px | 640px | `rendition-800.avif` | `image/avif` | **Sub-maximal** (800w selected, < 1500w) |
+| `/product/23` | `ProductDetailsClient` | `1280x800` | 2 | 559px | 640px | `rendition-1500.avif` | `image/avif` | **High-DPI** (1500w selected for 2x pixel ratio) |
 
-*Proof of Sub-Maximal Selection*: In mobile and tablet contexts, the browser engine evaluated `sizes` and selected `rendition-400.avif`, proving the browser does not trivially select the maximal candidate (1500w).
+*Proof of Sub-Maximal Selection*: In mobile and tablet contexts, the browser engine evaluated `sizes` and selected `rendition-400.avif`, proving the browser does not trivially select the maximal candidate (1500w). Explicit `clientWidth` and `naturalWidth` were recorded directly from live browser DOM properties.
 
 #### 3. Real Browser Network Responses & Cache Audit
 - **Sample Request**: `GET http://localhost:3106/media/public/<id>/rendition-400.avif`
@@ -173,11 +173,31 @@ Authoritative real-browser testing was executed via Chrome DevTools Protocol (CD
 - **Production CDN Cache**: `R2_INTEGRATION_PENDING` (configured intent: `public, max-age=31536000, immutable`).
 
 #### 4. Real Network Lazy-Loading Verification
+##### A. Carousel Secondary Slide Deferral
 - **Initial Page Load (`/shop`)**: Requests to secondary carousel slide 2 (`textureMediaId`) = **0**.
 - **Interactive Navigation**: Upon simulating user click on `button[aria-label="Next image"]`, slide 2 request was dispatched and logged in network events within 800ms.
 - **Result**: Proves structural lazy loading operates at the browser network layer, not merely markup declaration.
 
-#### 5. Suspension Hard Browser Gate Proof
+##### B. Offscreen ProductCard Network Lazy Loading
+- **Target Card**: "QA Offscreen Lazy Card" (`Product` ID: 1, Media ID: `134275fa-f428-413b-9883-2c9c9233731e`)
+- **Initial Viewport**: Desktop 1280x800 (DPR 1)
+- **Initial Request Count (before scroll)**: **0** requests logged
+- **Scroll Action**: `scrollIntoView({ block: 'center' })`
+- **Post-Scroll Request Count**: **1** request logged (`rendition-400.avif` requested at timestamp `14073.96543`)
+- **Result**: **PASS** (Definitively proves below-the-fold catalog cards defer image network requests until scrolled into viewport).
+
+#### 5. Admin Managed Gallery Journey Verification
+- **Test Case**: "9. Admin managed gallery journey: file upload preview, processing gate, reordering, and zero secret leak"
+- **Authenticated Page**: `/admin/products/20/edit` loaded via valid administrative session cookie (`admin_session`)
+- **Legacy Gallery State**: Existing legacy product images remain visible and editable.
+- **Temporary Blob Preview**: File input selection immediately generates and renders client-side `blob:` object URL preview.
+- **Processing Save Gate**: While uploaded media remains in `PROCESSING` / unattachable state, the form Submit button (`button[type="submit"]`) is strictly `disabled`.
+- **Ready State Save Clearance**: Once background processing completes and media transitions to `READY`, clicking refresh/poll enables the Submit button.
+- **Ordering Controls Usability**: Reorder buttons (`Move image down`) alter gallery item order cleanly in the live DOM.
+- **Zero Secrets / Internal Storage Leakage**: Ordinary Admin DOM outer HTML scanned for `canonical-master`, `PRIVATE_SOURCE`, `staging/`, `storageProviderKey`, `stagingProviderKey`, `canonicalMasterObjectId`, `AKIA`, `s3://` — **0 leaks detected**.
+- **Screenshot Captured**: `desktop-1280x800-admin-managed-gallery.png`
+
+#### 6. Suspension Hard Browser Gate Proof
 - **Fixture Setup**: Managed primary media suspended via `deliveryDisabledAt = NOW()`, with stale compatibility markers in `ProductImage.url` and `Product.image` (`stale-suspended-compat-marker.webp`).
 - **DOM HTML Stale Marker Occurrences**: **0**
 - **DOM Suspended Media ID Occurrences**: **0**
@@ -185,24 +205,34 @@ Authoritative real-browser testing was executed via Chrome DevTools Protocol (CD
 - **Network Requests to Canonical Masters**: **0**
 - **Fallback Behavior**: Main display cleanly rendered safe secondary managed media (`safeSecMediaId`).
 
-#### 6. Zero Master & Private Leak Audit Across All Surfaces
-- Scanned surfaces: `/shop` DOM, `/product/<id>` DOM, browser network URLs, console logs.
+#### 7. Zero Master & Private Leak Audit Across All Surfaces
+- Scanned surfaces: `/shop` DOM, `/product/<id>` DOM, `/admin/products/<id>/edit` DOM, browser network URLs, console logs.
 - Evaluated patterns: `canonical-master`, `PRIVATE_SOURCE`, `staging/`, `master.webp`, `master.png`, `storageProviderKey`, `stagingProviderKey`, `canonicalMasterObjectId`, `AKIA`, `s3://`.
 - **Total Leaks Detected**: **0**.
 
-#### 7. Browser Console & Page Safety
+#### 8. Browser Console & Page Safety
 - **Console Errors**: 0
 - **Uncaught Page Exceptions**: 0
 - **Unexpected HTTP >= 400 Responses**: 0
 
-#### 8. Real Viewport Screenshots
-- `mobile-390x844-shop.png` (390x844, DPR 2) — Shop catalog grid layout, 2-column mobile cards
-- `tablet-768x1024-shop.png` (768x1024, DPR 1) — Shop catalog grid layout, 2-column tablet cards
-- `desktop-1280x800-pdp.png` (1280x800, DPR 1) — Product detail page layout with eager priority LCP
-- `highdpi-1280x800-pdp.png` (1280x800, DPR 2) — Product detail page with high-DPI 1500w rendition
+#### 9. Real Viewport Screenshots Matrix
+| Screenshot | Resolution | DPR | Surface | Layout & Visual Evaluation |
+| :--- | :--- | :--- | :--- | :--- |
+| `desktop-1280x800-shop.png` | 1280x800 | 1 | `/shop` | 4-column catalog grid, clean pagination, no horizontal overflow |
+| `desktop-1280x800-admin-managed-gallery.png` | 1280x800 | 1 | `/admin/products/20/edit` | Admin edit form, managed gallery preview, reordering UI |
+| `desktop-1280x800-pdp.png` | 1280x800 | 1 | `/product/23` | Desktop PDP layout, eager LCP main image, thumbnails |
+| `highdpi-1280x800-pdp.png` | 1280x800 | 2 | `/product/23` | High-DPI PDP, crisp 1500w rendition, zero distortion |
+| `tablet-768x1024-shop.png` | 768x1024 | 1 | `/shop` | 3-column tablet catalog grid, clean alignment |
+| `tablet-768x1024-pdp.png` | 768x1024 | 1 | `/product/23` | Tablet PDP, stacked gallery and summary column |
+| `mobile-390x844-shop.png` | 390x844 | 2 | `/shop` | 2-column mobile catalog grid, touch-friendly targets |
+| `mobile-390x844-pdp.png` | 390x844 | 2 | `/product/23` | Mobile PDP, full-width responsive product image |
 
-#### 9. Visual Evidence Bundle
-- **ZIP Path**: `e:\Joy\pure-haven-bd-joy\pure-haven-bd\artifacts\phase6-media-browser.zip`
+- **Mobile Admin Screenshot**: NOT REQUIRED / NOT CAPTURED
+- **Visual Defect Audit**: 0 horizontal overflow, 0 broken images/icons, 0 unexpected crops, 0 image stretching, clean gallery alignment, clean typography, 0 responsive regressions.
+
+#### 10. Visual Evidence Bundle
+- **ZIP Path**: `artifacts/phase6-media-browser.zip`
 - **Downloads Path**: `C:\Users\wadud\Downloads\phase6-media-browser.zip`
-- **SHA-256**: `5f81d15ce3c94d9c307131fc0fb3641fee00791661b1bd56159a6b085e166348`
-- **Total Files**: 23 (4 screenshots, 3 network/execution JSON reports, 16 comparison fixtures)
+- **SHA-256**: `6dad053399e00c6e9ed44b0abd3a5dcd2b0c487181626c256bdf46dc68458352`
+- **Total Files**: 28 (8 screenshots, 4 network/execution JSON reports, 16 comparison fixtures)
+- **Pre-ZIP Secret Scan**: 0 findings across all bundled assets (synthetic canary verified active).

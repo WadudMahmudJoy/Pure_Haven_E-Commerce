@@ -1,0 +1,12 @@
+{
+  "targetCard": "QA Offscreen Lazy Card",
+  "productId": 1,
+  "mediaId": "33f9ae2f-3936-43cf-8e3a-3dc26581d353",
+  "initialViewport": "1280x800 (DPR 1)",
+  "initialRequestCount": 0,
+  "scrollAction": "scrollIntoView({ block: 'center' })",
+  "postScrollRequestCount": 1,
+  "firstRequestUrl": "http://localhost:3106/media/public/33f9ae2f-3936-43cf-8e3a-3dc26581d353/rendition-400.avif",
+  "firstRequestTimestamp": 14208.715652,
+  "result": "PASS"
+}

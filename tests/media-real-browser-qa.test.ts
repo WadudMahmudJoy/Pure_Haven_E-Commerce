@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+const adminSessionSecret = "phase6-media-test-session-secret-qa-3106";
+process.env.ADMIN_SESSION_SECRET = adminSessionSecret;
+
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
@@ -12,6 +15,7 @@ import { randomBytes, scrypt as scryptCallback, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import pg from "pg";
 import sharp from "sharp";
+import { createAdminSessionToken } from "../lib/adminSession";
 
 const scrypt = promisify(scryptCallback);
 const { Client } = pg;
@@ -100,6 +104,74 @@ async function assertPortAvailable(port: number): Promise<void> {
   });
 }
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function detectSecretCategories(content: string, adminPassword = "", secretKey = ""): string[] {
+  const categories: string[] = [];
+  const secretPatterns: Array<{ category: string; regex: RegExp }> = [
+    ...(adminPassword ? [{ category: "ephemeral-password", regex: new RegExp(escapeRegex(adminPassword)) }] : []),
+    { category: "scrypt-hash", regex: /scrypt\$[a-f0-9]+\$[a-f0-9]+/i },
+    { category: "credential-material", regex: /"password(?:Hash)?"\s*:\s*"[^"]+"/i },
+    { category: "database-url", regex: /DATABASE_URL(?:_TEST)?/ },
+    { category: "postgres-credentials", regex: /postgres(?:ql)?:\/\/[^@\s]+:[^@\s]+@/i },
+    { category: "authorization-header", regex: /authorization:\s*\S+/i },
+    { category: "bearer-token", regex: /bearer\s+[a-z0-9._~+/-]+=*/i },
+    { category: "cookie-header", regex: /(?:set-)?cookie:\s*[^\r\n]+/i },
+    { category: "session-token", regex: /pure_haven_admin_session/i },
+    {
+      category: "token-hash-material",
+      regex: /(?:passwordResetToken(?:Hash)?|resetToken(?:Hash)?|recoveryToken(?:Hash)?|recoveryHash|verificationToken(?:Hash)?|verificationHash|sessionToken(?:Hash)?|sessionHash|tokenHash)\s*[:=]\s*["']?[a-zA-Z0-9_-]{4,}["']?/i,
+    },
+    { category: "private-key", regex: /-----BEGIN[ A-Z0-9_-]+PRIVATE KEY-----/ },
+    ...(secretKey ? [{ category: "admin-secret", regex: new RegExp(escapeRegex(secretKey)) }] : []),
+    {
+      category: "env-assignment",
+      regex: /(?:[A-Z0-9_]*(?:PASSWORD|SECRET|API_KEY|TOKEN|PRIVATE_KEY)[A-Z0-9_]*)\s*=\s*(?:['"][^'"\r\n]+['"]|[^\s'"\r\n]+)/i,
+    },
+  ];
+
+  for (const { category, regex } of secretPatterns) {
+    if (regex.test(content)) {
+      categories.push(category);
+    }
+  }
+  return categories;
+}
+
+function scanDirectoryForSecrets(
+  dir: string,
+  adminPassword = "",
+  secretKey = ""
+): { totalFindings: number; findings: Array<{ file: string; category: string }> } {
+  const textFiles: string[] = [];
+  function walk(current: string) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (/\.(json|txt|log|md|csv|html)$/i.test(entry.name)) {
+        textFiles.push(full);
+      }
+    }
+  }
+  walk(dir);
+
+  const findings: Array<{ file: string; category: string }> = [];
+
+  for (const file of textFiles) {
+    const rel = path.relative(dir, file);
+    const content = fs.readFileSync(file, "utf8");
+    const matched = detectSecretCategories(content, adminPassword, secretKey);
+    for (const category of matched) {
+      findings.push({ file: rel, category });
+    }
+  }
+
+  return { totalFindings: findings.length, findings };
+}
+
 describe("Task 24 Real Browser & Network QA (CDP)", () => {
   let dbClient: pg.Client;
   let nextServerProc: ReturnType<typeof spawn> | null = null;
@@ -113,6 +185,8 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   let highDpiProductId = 0;
   let suspendedProductId = 0;
   let mixedProductId = 0;
+  let offscreenProductId = 0;
+  let adminEditProductId = 0;
 
   let photoMediaId = "";
   let textureMediaId = "";
@@ -120,6 +194,7 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   let suspendedMediaId = "";
   let safeSecMediaId = "";
   let gradientMediaId = "";
+  let offscreenMediaId = "";
 
   // Ephemeral admin credentials
   const ephemeralAdminEmail = `media-admin-${timestamp}@purehaven.test`;
@@ -258,8 +333,8 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
           <text x="${w / 2}" y="${w / 2 + 20}" font-size="${Math.max(24, Math.round(w / 15))}" font-family="sans-serif" text-anchor="middle" fill="#ffffff">${label} ${w}w</text>
         </svg>`;
         const svgBuf = Buffer.from(svg);
-        const webpBuf = await sharp(svgBuf).webp({ quality: 80 }).toBuffer();
-        const avifBuf = await sharp(svgBuf).avif({ quality: 65 }).toBuffer();
+        const webpBuf = await sharp(svgBuf).resize(w, w).webp({ quality: 80 }).toBuffer();
+        const avifBuf = await sharp(svgBuf).resize(w, w).avif({ quality: 65 }).toBuffer();
 
         fs.writeFileSync(path.join(mediaFolder, `rendition-${w}.webp`), webpBuf);
         fs.writeFileSync(path.join(mediaFolder, `rendition-${w}.avif`), avifBuf);
@@ -340,6 +415,7 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
     suspendedMediaId = randomUUID();
     safeSecMediaId = randomUUID();
     gradientMediaId = randomUUID();
+    offscreenMediaId = randomUUID();
 
     const photoMedia = await seedManagedMedia({ mediaId: photoMediaId, label: "Photo" });
     const textureMedia = await seedManagedMedia({ mediaId: textureMediaId, label: "Texture" });
@@ -347,39 +423,65 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
     await seedManagedMedia({ mediaId: suspendedMediaId, label: "Suspended", disabled: true });
     const safeSecMedia = await seedManagedMedia({ mediaId: safeSecMediaId, label: "SafeSecondary" });
     const gradientMedia = await seedManagedMedia({ mediaId: gradientMediaId, label: "Gradient" });
+    const offscreenMedia = await seedManagedMedia({ mediaId: offscreenMediaId, label: "Offscreen" });
 
-    // Seed Products
-    // 1. Multi-image product (Card Carousel)
-    const multiProd = await dbClient.query(`
+    // Seed Products:
+    // IMPORTANT: Products are sorted by `id: "desc"` in catalog queries!
+    // Therefore, items inserted FIRST have lower IDs (appear at bottom of page / below fold),
+    // and items inserted LAST have higher IDs (appear at the very TOP of /shop)!
+
+    // 1. Offscreen ProductCard (Product #1, lowest ID, sits far down in Row 6 below 800px viewport)
+    const offscreenProd = await dbClient.query(`
       INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
-      VALUES ('QA Managed Multi Cream', 1250, 15, '${photoMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
+      VALUES ('QA Offscreen Lazy Card', 1100, 7, '${offscreenMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
       RETURNING id;
     `);
-    multiImageProductId = multiProd.rows[0].id;
+    offscreenProductId = offscreenProd.rows[0].id;
+
+    await dbClient.query(`
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+      VALUES (${offscreenProductId}, '${offscreenMedia.primaryCompatUrl}', 1, 'MANAGED', '${offscreenMediaId}', NOW(), NOW());
+    `);
+
+    // 2. 18 filler products (Products #2..19) ensuring target card is in Row 6 (distance > 1800px from viewport)
+    for (let i = 1; i <= 18; i++) {
+      await dbClient.query(`
+        INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
+        VALUES ('QA Filler Product ${i}', 500, 10, '/images/categories/essentials.jpg', 'qa-skincare', ${categoryId}, true, NOW(), NOW());
+      `);
+    }
+
+    // 3. Admin Product for Edit & Gallery Journey (Product #20)
+    const adminProd = await dbClient.query(`
+      INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
+      VALUES ('QA Admin Edit Cleanser', 1400, 10, '/images/categories/skincare.jpg', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
+      RETURNING id;
+    `);
+    adminEditProductId = adminProd.rows[0].id;
+
+    await dbClient.query(`
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "altText", "createdAt", "updatedAt")
+      VALUES
+        (${adminEditProductId}, '/images/categories/skincare.jpg', 1, 'LEGACY_LOCAL', NULL, 'Legacy Skin', NOW(), NOW()),
+        (${adminEditProductId}, '/images/categories/bodycare.jpg', 2, 'LEGACY_LOCAL', NULL, 'Legacy Body', NOW(), NOW());
+    `);
+
+    // 4. Mixed legacy product (Product #21)
+    const mixProd = await dbClient.query(`
+      INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
+      VALUES ('QA Mixed Cleanser', 950, 8, '${gradientMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
+      RETURNING id;
+    `);
+    mixedProductId = mixProd.rows[0].id;
 
     await dbClient.query(`
       INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
       VALUES
-        (${multiImageProductId}, '${photoMedia.primaryCompatUrl}', 1, 'MANAGED', '${photoMediaId}', NOW(), NOW()),
-        (${multiImageProductId}, '${textureMedia.primaryCompatUrl}', 2, 'MANAGED', '${textureMediaId}', NOW(), NOW());
+        (${mixedProductId}, '${gradientMedia.primaryCompatUrl}', 1, 'MANAGED', '${gradientMediaId}', NOW(), NOW()),
+        (${mixedProductId}, '/images/categories/bodycare.jpg', 2, 'LEGACY_LOCAL', NULL, NOW(), NOW());
     `);
 
-    // 2. High-DPI Detail Product
-    const highDpiProd = await dbClient.query(`
-      INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
-      VALUES ('QA High-DPI Serum', 2100, 20, '${highDpiMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
-      RETURNING id;
-    `);
-    highDpiProductId = highDpiProd.rows[0].id;
-
-    await dbClient.query(`
-      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
-      VALUES
-        (${highDpiProductId}, '${highDpiMedia.primaryCompatUrl}', 1, 'MANAGED', '${highDpiMediaId}', NOW(), NOW()),
-        (${highDpiProductId}, '/images/categories/skincare.jpg', 2, 'LEGACY_LOCAL', NULL, NOW(), NOW());
-    `);
-
-    // 3. Suspended Product (with stale compatibility markers)
+    // 5. Suspended Product (Product #22)
     const staleMarker = `http://localhost:${QA_PORT}/media/stale-suspended-compat-marker.webp`;
     const suspProd = await dbClient.query(`
       INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
@@ -395,30 +497,37 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
         (${suspendedProductId}, '${safeSecMedia.primaryCompatUrl}', 2, 'MANAGED', '${safeSecMediaId}', NOW(), NOW());
     `);
 
-    // 4. Mixed legacy product
-    const mixProd = await dbClient.query(`
+    // 6. High-DPI Detail Product (Product #23)
+    const highDpiProd = await dbClient.query(`
       INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
-      VALUES ('QA Mixed Cleanser', 950, 8, '${gradientMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
+      VALUES ('QA High-DPI Serum', 2100, 20, '${highDpiMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
       RETURNING id;
     `);
-    mixedProductId = mixProd.rows[0].id;
+    highDpiProductId = highDpiProd.rows[0].id;
 
     await dbClient.query(`
       INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
       VALUES
-        (${mixedProductId}, '${gradientMedia.primaryCompatUrl}', 1, 'MANAGED', '${gradientMediaId}', NOW(), NOW()),
-        (${mixedProductId}, '/images/categories/bodycare.jpg', 2, 'LEGACY_LOCAL', NULL, NOW(), NOW());
+        (${highDpiProductId}, '${highDpiMedia.primaryCompatUrl}', 1, 'MANAGED', '${highDpiMediaId}', NOW(), NOW()),
+        (${highDpiProductId}, '/images/categories/skincare.jpg', 2, 'LEGACY_LOCAL', NULL, NOW(), NOW());
     `);
 
-    // 5. Additional products to create offscreen cards
-    for (let i = 1; i <= 8; i++) {
-      await dbClient.query(`
-        INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
-        VALUES ('QA Filler Product ${i}', 500, 10, '/images/categories/essentials.jpg', 'qa-skincare', ${categoryId}, true, NOW(), NOW());
-      `);
-    }
+    // 7. Multi-image product (Product #24, highest ID, appears in Row 1 at the top of /shop!)
+    const multiProd = await dbClient.query(`
+      INSERT INTO "Product" (name, price, stock, image, category, "categoryId", "isActive", "createdAt", "updatedAt")
+      VALUES ('QA Managed Multi Cream', 1250, 15, '${photoMedia.primaryCompatUrl}', 'qa-skincare', ${categoryId}, true, NOW(), NOW())
+      RETURNING id;
+    `);
+    multiImageProductId = multiProd.rows[0].id;
 
-    // Seed Ephemeral Admin Credential
+    await dbClient.query(`
+      INSERT INTO "ProductImage" ("productId", url, "sortOrder", "sourceKind", "managedMediaId", "createdAt", "updatedAt")
+      VALUES
+        (${multiImageProductId}, '${photoMedia.primaryCompatUrl}', 1, 'MANAGED', '${photoMediaId}', NOW(), NOW()),
+        (${multiImageProductId}, '${textureMedia.primaryCompatUrl}', 2, 'MANAGED', '${textureMediaId}', NOW(), NOW());
+    `);
+
+    // 8. Seed Ephemeral Admin Credential
     const salt = randomBytes(16).toString("hex");
     const key = (await scrypt(ephemeralAdminPassword, salt, 64)) as Buffer;
     const passwordHash = `scrypt$${salt}$${key.toString("hex")}`;
@@ -428,7 +537,7 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       VALUES ('${ephemeralAdminEmail}', '${passwordHash}', NOW(), NOW());
     `);
 
-    // 6. Start Next.js Production Server
+    // 9. Start Next.js Production Server with full media environment
     const nextBin = path.resolve(process.cwd(), "node_modules", "next", "dist", "bin", "next");
     nextServerProc = spawn(process.execPath, [nextBin, "start", "-p", String(QA_PORT)], {
       cwd: process.cwd(),
@@ -437,8 +546,10 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
         DATABASE_URL: disposableTestUrl,
         PORT: String(QA_PORT),
         NODE_ENV: "production",
+        MEDIA_ENVIRONMENT: "test",
+        MANAGED_MEDIA_INGESTION_ENABLED: "true",
         MEDIA_PUBLIC_ORIGIN: `http://localhost:${QA_PORT}/media`,
-        ADMIN_SESSION_SECRET: "phase6-media-test-session-secret-qa-3106",
+        ADMIN_SESSION_SECRET: adminSessionSecret,
       },
       stdio: "pipe",
     });
@@ -459,7 +570,7 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       throw new Error("Next.js QA server failed to start within 20s");
     }
 
-    // 7. Start Google Chrome Headless
+    // 10. Start Google Chrome Headless
     tempChromeProfile = fs.mkdtempSync(path.join(os.tmpdir(), "ph-chrome-media-"));
     chromeProc = spawn(
       CHROME_PATH,
@@ -611,7 +722,7 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 2. Viewport Matrix, DPR Scaling & Live currentSrc Table
+  // 2. Viewport Matrix, DPR Scaling, naturalWidth & Live currentSrc Table
   // ---------------------------------------------------------------------------
   it("2. Evaluates responsive selection and proves sub-maximal rendition selection in real browser", async () => {
     const observations: Array<{
@@ -626,10 +737,22 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       requestedRenditionWidth: number;
     }> = [];
 
-    // --- Mobile: 390x844, DPR 2 ---
+    // --- Mobile: 390x844, DPR 2 (/shop & /pdp) ---
     await setViewport(390, 844, 2, true);
     await navigateAndWait(`http://localhost:${QA_PORT}/shop`, 1500);
     await captureScreenshot("mobile-390x844-shop.png");
+
+    // Wait for image completion if needed
+    await evaluateInPage(`(() => {
+      const img = document.querySelector('a[href="/product/${multiImageProductId}"] picture img');
+      if (!img) return true;
+      if (img.complete && img.currentSrc) return true;
+      return new Promise((resolve) => {
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(true);
+        setTimeout(() => resolve(true), 1200);
+      });
+    })()`);
 
     const mobileCardImg = await evaluateInPage<{
       currentSrc: string;
@@ -641,9 +764,11 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
     })()`);
 
     assert.ok(mobileCardImg, "Mobile card image must exist in DOM");
-    assert.ok(mobileCardImg.currentSrc.includes(photoMediaId), "Must reference photo media");
+    assert.ok(
+      mobileCardImg.currentSrc.includes(photoMediaId),
+      `Mobile card must reference photo media, got: ${mobileCardImg.currentSrc}`
+    );
 
-    // Match rendition width from currentSrc URL
     const mobileWidthMatch = mobileCardImg.currentSrc.match(/rendition-(\d+)\.(webp|avif)/);
     const mobileRenditionWidth = mobileWidthMatch ? parseInt(mobileWidthMatch[1], 10) : 0;
     const mobileFormat = mobileWidthMatch ? `image/${mobileWidthMatch[2]}` : "unknown";
@@ -667,7 +792,11 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       `Mobile card must select <= 800w rendition, got ${mobileRenditionWidth}w`
     );
 
-    // --- Tablet: 768x1024, DPR 1 ---
+    // Mobile PDP screenshot: 390x844, DPR 2
+    await navigateAndWait(`http://localhost:${QA_PORT}/product/${highDpiProductId}`, 1500);
+    await captureScreenshot("mobile-390x844-pdp.png");
+
+    // --- Tablet: 768x1024, DPR 1 (/shop & /pdp) ---
     await setViewport(768, 1024, 1, false);
     await navigateAndWait(`http://localhost:${QA_PORT}/shop`, 1500);
     await captureScreenshot("tablet-768x1024-shop.png");
@@ -697,8 +826,15 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       requestedRenditionWidth: tabletRenditionWidth,
     });
 
-    // --- Desktop: 1280x800, DPR 1 (PDP) ---
+    // Tablet PDP screenshot: 768x1024, DPR 1
+    await navigateAndWait(`http://localhost:${QA_PORT}/product/${highDpiProductId}`, 1500);
+    await captureScreenshot("tablet-768x1024-pdp.png");
+
+    // --- Desktop: 1280x800, DPR 1 (/shop & /pdp) ---
     await setViewport(1280, 800, 1, false);
+    await navigateAndWait(`http://localhost:${QA_PORT}/shop`, 1500);
+    await captureScreenshot("desktop-1280x800-shop.png");
+
     await navigateAndWait(`http://localhost:${QA_PORT}/product/${highDpiProductId}`, 1500);
     await captureScreenshot("desktop-1280x800-pdp.png");
 
@@ -773,7 +909,7 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 3. Lazy-Loading Network Request Sequence & Timing
+  // 3. Carousel Secondary Image Deferral
   // ---------------------------------------------------------------------------
   it("3. Verifies secondary carousel image is deferred until user navigation", async () => {
     await setViewport(1280, 800, 1, false);
@@ -815,9 +951,69 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 4. Product Detail Network Behavior & Thumbnail Switching
+  // 4. Offscreen ProductCard Lazy Loading Proof
   // ---------------------------------------------------------------------------
-  it("4. PDP main image has eager/priority hints and thumbnail switches main image cleanly", async () => {
+  it("4. Verifies offscreen product card image is deferred until scrolled into viewport", async () => {
+    await setViewport(1280, 800, 1, false);
+    capturedRequests.length = 0; // reset log
+
+    await navigateAndWait(`http://localhost:${QA_PORT}/shop`, 1500);
+
+    // Initial state: Offscreen ProductCard is positioned far down in Row 6 (distance > 1800px below viewport)
+    const initialOffscreenRequests = capturedRequests.filter((r) =>
+      r.request.url.includes(offscreenMediaId)
+    );
+    assert.strictEqual(
+      initialOffscreenRequests.length,
+      0,
+      `Offscreen card image must have 0 network requests before scrolling (got ${initialOffscreenRequests.length})`
+    );
+
+    // Scroll the target card into viewport
+    const scrolled = await evaluateInPage<boolean>(`(() => {
+      const target = document.querySelector('a[href="/product/${offscreenProductId}"]');
+      if (!target) return false;
+      target.scrollIntoView({ block: "center", behavior: "instant" });
+      return true;
+    })()`);
+
+    assert.ok(scrolled, "Offscreen card anchor must be present in DOM and scrolled into view");
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // Post-scroll state: Offscreen card image must now be requested!
+    const postScrollRequests = capturedRequests.filter((r) =>
+      r.request.url.includes(offscreenMediaId)
+    );
+    assert.ok(
+      postScrollRequests.length >= 1,
+      `Offscreen card image must be requested after scrolling into viewport (got ${postScrollRequests.length})`
+    );
+
+    const firstReq = postScrollRequests[0];
+    const offscreenEvidence = {
+      targetCard: "QA Offscreen Lazy Card",
+      productId: offscreenProductId,
+      mediaId: offscreenMediaId,
+      initialViewport: "1280x800 (DPR 1)",
+      initialRequestCount: initialOffscreenRequests.length,
+      scrollAction: "scrollIntoView({ block: 'center' })",
+      postScrollRequestCount: postScrollRequests.length,
+      firstRequestUrl: firstReq.request.url,
+      firstRequestTimestamp: firstReq.timestamp,
+      result: "PASS",
+    };
+
+    fs.writeFileSync(
+      path.join(evidenceDir, "real-browser-offscreen-lazy-evidence.json"),
+      JSON.stringify(offscreenEvidence, null, 2),
+      "utf8"
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 5. Product Detail Network Behavior & Thumbnail Switching
+  // ---------------------------------------------------------------------------
+  it("5. PDP main image has eager/priority hints and thumbnail switches main image cleanly", async () => {
     await setViewport(1280, 800, 1, false);
     await navigateAndWait(`http://localhost:${QA_PORT}/product/${highDpiProductId}`, 1500);
 
@@ -852,9 +1048,9 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 5. Suspension Hard Browser Gate
+  // 6. Suspension Hard Browser Gate
   // ---------------------------------------------------------------------------
-  it("5. Suspended managed primary with stale markers produces ZERO browser leaks and requests", async () => {
+  it("6. Suspended managed primary with stale markers produces ZERO browser leaks and requests", async () => {
     await setViewport(1280, 800, 1, false);
     capturedRequests.length = 0;
 
@@ -907,9 +1103,9 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 6. Zero Master & Private Leak Audit Across All Surfaces
+  // 7. Zero Master & Private Leak Audit Across All Surfaces
   // ---------------------------------------------------------------------------
-  it("6. Master object keys, private paths, and credentials never leak into real browser DOM or network", async () => {
+  it("7. Master object keys, private paths, and credentials never leak into real browser DOM or network", async () => {
     const forbiddenPatterns = [
       "canonical-master",
       "PRIVATE_SOURCE",
@@ -949,9 +1145,9 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 7. Network Response & Cache Evidence
+  // 8. Network Response & Cache Evidence
   // ---------------------------------------------------------------------------
-  it("7. Captures real HTTP response headers and audits local cache contract", async () => {
+  it("8. Captures real HTTP response headers and audits local cache contract", async () => {
     const mediaResponses = capturedResponses.filter((r) =>
       r.response.url.includes("/media/public/")
     );
@@ -990,10 +1186,187 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 8. Visual Evidence Package & Final Compression
+  // 9. Admin Managed Gallery Real-Browser Journey
   // ---------------------------------------------------------------------------
-  it("8. Generates visual screenshots, asserts 0 console errors, and packages evidence bundle", async () => {
-    // Assert 0 real browser console errors
+  it("9. Admin managed gallery journey: file upload preview, processing gate, reordering, and zero secret leak", async () => {
+    await setViewport(1280, 800, 1, false);
+
+    // 1. Authenticate admin browser session via signed session cookie
+    const sessionToken = createAdminSessionToken(ephemeralAdminEmail);
+    await sendCdp("Network.setCookie", {
+      name: "pure_haven_admin_session",
+      value: sessionToken,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+    });
+
+    // 2. Load authenticated Admin product edit page
+    await navigateAndWait(`http://localhost:${QA_PORT}/admin/products/${adminEditProductId}/edit`, 2000);
+
+    const heading = await evaluateInPage<string>("document.querySelector('h1')?.textContent || ''");
+    assert.ok(heading.includes("Edit Product"), "Admin edit product page must load with heading");
+
+    // 3. Existing legacy gallery remains visible/editable
+    const legacyItemCount = await evaluateInPage<number>(
+      "document.querySelectorAll('input[aria-label^=\"Alt text for image\"]').length"
+    );
+    assert.strictEqual(legacyItemCount, 2, "Must display 2 existing legacy gallery items");
+
+    // 4. File selection produces blob: temporary preview and enters Processing/unattachable state
+    const fileSelectionTriggered = await evaluateInPage<boolean>(`(() => {
+      const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const file = new File([bytes], "test-upload.png", { type: "image/png" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const fileInput = document.querySelector('input[type="file"]');
+      if (!fileInput) return false;
+      fileInput.files = dt.files;
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+
+    assert.ok(fileSelectionTriggered, "File input event must be dispatched");
+    await new Promise((r) => setTimeout(r, 600));
+
+    // Verify blob: temporary preview appears in DOM
+    const blobPreviewFound = await evaluateInPage<boolean>(`(() => {
+      const imgs = Array.from(document.querySelectorAll('img'));
+      return imgs.some((img) => img.src && img.src.startsWith('blob:'));
+    })()`);
+    assert.ok(blobPreviewFound, "DOM must immediately display a temporary blob: image preview");
+
+    // 5. Processing/unattachable state blocks Save
+    const isSaveBlockedInitially = await evaluateInPage<boolean>(
+      "Boolean(document.querySelector('button[type=\"submit\"]')?.hasAttribute('disabled'))"
+    );
+    assert.strictEqual(isSaveBlockedInitially, true, "Submit button must be disabled while upload is processing/unattachable");
+
+    // 6. Find uploaded media record in DB, advance to READY with renditions, and refresh status
+    await new Promise((r) => setTimeout(r, 500));
+    const mediaRow = await dbClient.query(
+      `SELECT id FROM "ManagedMedia" WHERE "ingestActorScope" LIKE 'admin-%' ORDER BY "createdAt" DESC LIMIT 1`
+    );
+    assert.ok(mediaRow.rows.length > 0, "Uploaded media record must exist in database");
+    const uploadedMediaId = mediaRow.rows[0].id;
+
+    // Create delivery rendition for uploaded media
+    const uploadedFolder = path.join(localMediaPublicDir, uploadedMediaId);
+    if (!fs.existsSync(uploadedFolder)) {
+      fs.mkdirSync(uploadedFolder, { recursive: true });
+    }
+    const sampleWebp = await sharp({
+      create: {
+        width: 800,
+        height: 800,
+        channels: 4,
+        background: { r: 161, g: 45, b: 74, alpha: 1 },
+      },
+    })
+      .webp({ quality: 80 })
+      .toBuffer();
+    fs.writeFileSync(path.join(uploadedFolder, "rendition-800.webp"), sampleWebp);
+
+    const uploadedRunId = randomUUID();
+    await dbClient.query(`
+      INSERT INTO "MediaProcessingRun" (
+        id, "managedMediaId", "profileVersion", "profileDefinitionHash", state,
+        "completedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        '${uploadedRunId}', '${uploadedMediaId}', 'PRODUCT_IMAGE_PROFILE_V1', 'hash-v1', 'COMPLETE',
+        NOW(), NOW(), NOW()
+      );
+    `);
+
+    await dbClient.query(`
+      INSERT INTO "MediaObject" (
+        id, "processingRunId", role, "accessClass", "variantKey",
+        "storageProviderKey", "objectKey", "mimeType", width, height, "byteSize",
+        "checksumSha256", "createdAt", "updatedAt"
+      ) VALUES (
+        '${randomUUID()}', '${uploadedRunId}', 'RENDITION', 'PUBLIC_DELIVERY', 'webp-800',
+        'local-public', 'public/${uploadedMediaId}/rendition-800.webp', 'image/webp', 800, 800, 4096,
+        'sha-admin-webp-800', NOW(), NOW()
+      );
+    `);
+
+    await dbClient.query(`
+      UPDATE "ManagedMedia"
+      SET "lifecycleState" = 'READY', "activeProcessingRunId" = '${uploadedRunId}'
+      WHERE id = '${uploadedMediaId}';
+    `);
+
+    // Click "Refresh status" or wait for status poll
+    await evaluateInPage<boolean>(`(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const refreshBtn = btns.find((b) => b.textContent && b.textContent.includes('Refresh status'));
+      if (refreshBtn) {
+        refreshBtn.click();
+        return true;
+      }
+      return false;
+    })()`);
+
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // Verify Save button is now ENABLED
+    const isSaveEnabledNow = await evaluateInPage<boolean>(
+      "!document.querySelector('button[type=\"submit\"]')?.hasAttribute('disabled')"
+    );
+    assert.strictEqual(isSaveEnabledNow, true, "Submit button must become enabled once media is Ready");
+
+    // 7. Ordering controls are usable
+    const altBeforeReorder = await evaluateInPage<string[]>(
+      "Array.from(document.querySelectorAll('input[aria-label^=\"Alt text for image\"]')).map((i) => i.value)"
+    );
+
+    const moved = await evaluateInPage<boolean>(`(() => {
+      const moveDownBtn = document.querySelector('button[aria-label="Move image down"]:not([disabled])');
+      if (!moveDownBtn) return false;
+      moveDownBtn.click();
+      return true;
+    })()`);
+    assert.ok(moved, "Move image down button must be clickable");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const altAfterReorder = await evaluateInPage<string[]>(
+      "Array.from(document.querySelectorAll('input[aria-label^=\"Alt text for image\"]')).map((i) => i.value)"
+    );
+    assert.notDeepStrictEqual(altBeforeReorder, altAfterReorder, "Gallery order must change after clicking Move down");
+
+    // 8. Ordinary Admin DOM contains zero leaks of secrets or internal storage keys
+    const adminDomHtml = await evaluateInPage<string>("document.documentElement.outerHTML");
+    const forbiddenPatterns = [
+      "canonical-master",
+      "PRIVATE_SOURCE",
+      "staging/",
+      "storageProviderKey",
+      "stagingProviderKey",
+      "canonicalMasterObjectId",
+      "AKIA",
+      "s3://",
+    ];
+    for (const pattern of forbiddenPatterns) {
+      assert.strictEqual(
+        adminDomHtml.includes(pattern),
+        false,
+        `Admin DOM must contain zero leaks of '${pattern}'`
+      );
+    }
+
+    // 9. Capture required desktop Admin screenshot
+    await captureScreenshot("desktop-1280x800-admin-managed-gallery.png");
+  });
+
+  // ---------------------------------------------------------------------------
+  // 10. Visual Evidence Package & Final Compression
+  // ---------------------------------------------------------------------------
+  it("10. Generates visual screenshots, asserts 0 console errors, verifies secret scan, and packages evidence bundle", async () => {
+    // Assert 0 real browser console errors & uncaught exceptions
     assert.strictEqual(
       consoleErrors.length,
       0,
@@ -1005,11 +1378,72 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       `Browser uncaught exceptions detected: ${uncaughtExceptions.join("; ")}`
     );
 
-    // Verify screenshots were written to disk
+    // Verify all 8 screenshots exist on disk
     const screenshots = fs.readdirSync(screenshotsDir);
-    assert.ok(screenshots.length >= 4, "Must produce at least 4 real browser viewport screenshots");
+    const requiredScreenshots = [
+      "mobile-390x844-shop.png",
+      "mobile-390x844-pdp.png",
+      "tablet-768x1024-shop.png",
+      "tablet-768x1024-pdp.png",
+      "desktop-1280x800-shop.png",
+      "desktop-1280x800-pdp.png",
+      "highdpi-1280x800-pdp.png",
+      "desktop-1280x800-admin-managed-gallery.png",
+    ];
 
-    // Update comprehensive evidence report
+    for (const reqShot of requiredScreenshots) {
+      assert.ok(
+        screenshots.includes(reqShot),
+        `Required screenshot '${reqShot}' must exist in screenshots directory`
+      );
+    }
+    assert.strictEqual(screenshots.length, 8, `Exactly 8 screenshots must exist, got ${screenshots.length}`);
+
+    // Pre-ZIP Secret Scan on evidence directory
+    const preScan = scanDirectoryForSecrets(evidenceDir, ephemeralAdminPassword, adminSessionSecret);
+    assert.strictEqual(
+      preScan.totalFindings,
+      0,
+      `Evidence directory secret scan failed with findings: ${JSON.stringify(preScan.findings)}`
+    );
+
+    // Verify secret scanner synthetic canary
+    const canarySnippet = "Authorization: Basic ZmFrZTpmYWtl";
+    const canaryDetected = detectSecretCategories(canarySnippet);
+    assert.ok(
+      canaryDetected.includes("authorization-header"),
+      "Synthetic canary must detect authorization-header category"
+    );
+
+    // Package Evidence ZIP
+    const zipPath = path.join(process.cwd(), "artifacts", "phase6-media-browser.zip");
+    const downloadsZipPath = path.join(os.homedir(), "Downloads", "phase6-media-browser.zip");
+
+    if (fs.existsSync(zipPath)) {
+      fs.unlinkSync(zipPath);
+    }
+
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `Compress-Archive -Path '${evidenceDir}\\*' -DestinationPath '${zipPath}' -Force`,
+      ],
+      { stdio: "pipe" }
+    );
+
+    assert.ok(fs.existsSync(zipPath), "artifacts/phase6-media-browser.zip must be created");
+
+    // Copy to ~/Downloads
+    fs.copyFileSync(zipPath, downloadsZipPath);
+    assert.ok(fs.existsSync(downloadsZipPath), "Downloads phase6-media-browser.zip must exist");
+
+    // Compute SHA256 of ZIP
+    const zipBuf = fs.readFileSync(zipPath);
+    const sha256 = (await import("node:crypto")).createHash("sha256").update(zipBuf).digest("hex");
+
+    // Update comprehensive execution report
     const evidenceReport = {
       generatedAt: new Date().toISOString(),
       harness: {
@@ -1023,6 +1457,8 @@ describe("Task 24 Real Browser & Network QA (CDP)", () => {
       uncaughtExceptionsCount: uncaughtExceptions.length,
       totalRequestsLogged: capturedRequests.length,
       totalResponsesLogged: capturedResponses.length,
+      secretScanFindings: preScan.totalFindings,
+      zipSha256: sha256,
     };
 
     fs.writeFileSync(

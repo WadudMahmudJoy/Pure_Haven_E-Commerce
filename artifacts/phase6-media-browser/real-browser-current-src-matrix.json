@@ -5,7 +5,7 @@
     "viewport": "390x844",
     "dpr": 2,
     "renderedWidth": 153,
-    "currentSrc": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+    "currentSrc": "http://localhost:3106/media/public/2d8264e9-0bbe-4fb8-a157-83a448bd7094/rendition-400.avif",
     "naturalWidth": 195,
     "requestedFormat": "image/avif",
     "requestedRenditionWidth": 400
@@ -16,29 +16,29 @@
     "viewport": "768x1024",
     "dpr": 1,
     "renderedWidth": 321,
-    "currentSrc": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+    "currentSrc": "http://localhost:3106/media/public/2d8264e9-0bbe-4fb8-a157-83a448bd7094/rendition-400.avif",
     "naturalWidth": 253,
     "requestedFormat": "image/avif",
     "requestedRenditionWidth": 400
   },
   {
-    "page": "/product/2",
+    "page": "/product/23",
     "component": "ProductDetailsClient",
     "viewport": "1280x800",
     "dpr": 1,
     "renderedWidth": 559,
-    "currentSrc": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-800.avif",
+    "currentSrc": "http://localhost:3106/media/public/dae907d2-4427-4070-9bcb-e054d8adc4af/rendition-800.avif",
     "naturalWidth": 640,
     "requestedFormat": "image/avif",
     "requestedRenditionWidth": 800
   },
   {
-    "page": "/product/2",
+    "page": "/product/23",
     "component": "ProductDetailsClient",
     "viewport": "1280x800",
     "dpr": 2,
     "renderedWidth": 559,
-    "currentSrc": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.avif",
+    "currentSrc": "http://localhost:3106/media/public/dae907d2-4427-4070-9bcb-e054d8adc4af/rendition-1500.avif",
     "naturalWidth": 640,
     "requestedFormat": "image/avif",
     "requestedRenditionWidth": 1500
