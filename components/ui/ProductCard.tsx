@@ -7,6 +7,7 @@ import { useCart } from "@/components/cart/CartContext";
 import { useWishlist } from "@/components/wishlist/WishlistContext";
 import ProductCardCarousel from "./ProductCardCarousel";
 import { normalizeImageSrc } from "@/lib/imagePaths";
+import type { PublicProductMediaProjection } from "@/lib/catalog/types";
 import {
   resolveEyebrow,
   resolveCardBadge,
@@ -29,6 +30,8 @@ export type ProductCardProps = {
   isUpcoming?: boolean;
   badgeText?: string | null;
   badgeTone?: string | null;
+  media?: PublicProductMediaProjection;
+  priority?: boolean;
 };
 
 export default function ProductCard(props: ProductCardProps) {
@@ -50,6 +53,8 @@ export default function ProductCard(props: ProductCardProps) {
     isUpcoming,
     badgeText,
     badgeTone,
+    media,
+    priority,
   } = props;
 
   const effectiveImages = useMemo(() => {
@@ -163,6 +168,8 @@ export default function ProductCard(props: ProductCardProps) {
           productName={name}
           category={category}
           images={effectiveImages}
+          media={media}
+          priority={priority}
         />
 
         {cardBadge ? (

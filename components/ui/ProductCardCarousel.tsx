@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import SafeImage from "@/components/ui/SafeImage";
+import ResponsiveProductImage from "@/components/ui/ResponsiveProductImage";
 import { normalizeImageSrc } from "@/lib/imagePaths";
+import type {
+  PublicProductMediaProjection,
+  PublicProductGalleryImage,
+} from "@/lib/catalog/types";
 import {
   createInitialCarouselState,
   markSlideLoaded,
@@ -19,6 +24,7 @@ export type ProductCardCarouselProps = {
   productName: string;
   category: string;
   images: string[];
+  media?: PublicProductMediaProjection;
   priority?: boolean;
 };
 
@@ -27,6 +33,7 @@ export default function ProductCardCarousel({
   productName,
   category,
   images,
+  media,
   priority = false,
 }: ProductCardCarouselProps) {
   // Fail-closed on missing or empty image inputs (never invent a fake [""] gallery)
@@ -38,6 +45,17 @@ export default function ProductCardCarousel({
   const gallery = useMemo(() => {
     return images.slice(0, 4);
   }, [images]);
+
+  const resolvedGalleryItems = useMemo<PublicProductGalleryImage[]>(() => {
+    if (media?.gallery && media.gallery.length > 0) {
+      return media.gallery.slice(0, 4);
+    }
+    return gallery.map((src) => ({
+      kind: "legacy" as const,
+      src,
+      altText: productName,
+    }));
+  }, [media, gallery, productName]);
 
   const [state, setState] = useState<CarouselState>(() =>
     createInitialCarouselState(gallery.length)
@@ -57,10 +75,13 @@ export default function ProductCardCarousel({
     if (typeof window === "undefined") return;
 
     const targetIndex = state.pendingIndex;
-    const targetRawSrc = gallery[targetIndex];
-    if (!targetRawSrc) return;
+    const targetItem = resolvedGalleryItems[targetIndex];
+    if (!targetItem) return;
 
-    const normalizedTargetSrc = normalizeImageSrc(targetRawSrc, { category });
+    const targetSrc =
+      targetItem.kind === "managed"
+        ? targetItem.media.fallbackSrc
+        : normalizeImageSrc(targetItem.src, { category });
 
     let isAborted = false;
     const preloader = new window.Image();
@@ -75,14 +96,14 @@ export default function ProductCardCarousel({
       setState((prev) => failSlide(prev, targetIndex).state);
     };
 
-    preloader.src = normalizedTargetSrc;
+    preloader.src = targetSrc;
 
     return () => {
       isAborted = true;
       preloader.onload = null;
       preloader.onerror = null;
     };
-  }, [state.pendingIndex, gallery, category]);
+  }, [state.pendingIndex, resolvedGalleryItems, category]);
 
   const availableIndices = useMemo(
     () => getAvailableSlideIndices(state),
@@ -95,6 +116,8 @@ export default function ProductCardCarousel({
     state.totalImages > 1 && availableIndices.length > 0;
 
   const displayedIndex = state.displayedIndex;
+  const currentItem =
+    resolvedGalleryItems[displayedIndex] || resolvedGalleryItems[0];
   const currentRawSrc = gallery[displayedIndex] || gallery[0] || "";
   const currentSrc = normalizeImageSrc(currentRawSrc, { category });
 
@@ -206,15 +229,28 @@ export default function ProductCardCarousel({
     >
       {/* Active product image is clickable to /product/{id} */}
       <Link href={"/product/" + productId} className="block aspect-square w-full">
-        <SafeImage
-          src={currentSrc}
-          alt={productName}
-          category={category}
-          priority={priority}
-          onLoad={displayedIndex === 0 ? handlePrimaryLoad : undefined}
-          onErrorCapture={displayedIndex === 0 ? handlePrimaryError : undefined}
-          className="aspect-square w-full object-cover transition duration-500 group-hover:scale-[1.03] motion-reduce:transform-none motion-reduce:transition-none"
-        />
+        {currentItem?.kind === "managed" ? (
+          <ResponsiveProductImage
+            image={currentItem.media}
+            alt={currentItem.altText || productName}
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+            loading={displayedIndex === 0 && priority ? "eager" : "lazy"}
+            fetchPriority={displayedIndex === 0 && priority ? "high" : undefined}
+            className="aspect-square w-full object-cover transition duration-500 group-hover:scale-[1.03] motion-reduce:transform-none motion-reduce:transition-none"
+            onLoad={displayedIndex === 0 ? handlePrimaryLoad : undefined}
+            onErrorCapture={displayedIndex === 0 ? handlePrimaryError : undefined}
+          />
+        ) : (
+          <SafeImage
+            src={currentItem ? currentItem.src : currentSrc}
+            alt={currentItem?.altText || productName}
+            category={category}
+            priority={displayedIndex === 0 && priority}
+            onLoad={displayedIndex === 0 ? handlePrimaryLoad : undefined}
+            onErrorCapture={displayedIndex === 0 ? handlePrimaryError : undefined}
+            className="aspect-square w-full object-cover transition duration-500 group-hover:scale-[1.03] motion-reduce:transform-none motion-reduce:transition-none"
+          />
+        )}
       </Link>
 
       {/* Carousel controls are SIBLINGS of the product Link to avoid invalid <a><button></a> nesting */}
