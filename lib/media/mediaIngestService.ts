@@ -7,6 +7,10 @@ import {
   hashProcessingProfile,
 } from "./processingProfile";
 import { canAttachManagedMedia, type ManagedMediaLifecycleState } from "./domain";
+import { getMediaStorageConfig } from "./config";
+import { createMediaStorage } from "./storage/registry";
+import { PrismaMediaRepository } from "./mediaRepository";
+import { prisma } from "@/lib/prisma";
 
 export type StartProductImageIngestInput = Readonly<{
   actorScope: string;
@@ -140,4 +144,32 @@ export class DefaultMediaIngestService implements MediaIngestService {
       attachable: canAttachManagedMedia(updated.lifecycleState, updated.deliveryDisabledAt),
     };
   }
+}
+
+let _defaultIngestService: MediaIngestService | null = null;
+
+export function getMediaIngestService(): MediaIngestService {
+  if (_defaultIngestService) return _defaultIngestService;
+
+  const storageConfig = getMediaStorageConfig();
+  const privateKey = process.env.MEDIA_PRIVATE_PROVIDER_KEY || "dev-private-local-01";
+  const providerConf = storageConfig.providers[privateKey] || {
+    kind: "local" as const,
+    accessClass: "PRIVATE_SOURCE" as const,
+    root: process.env.MEDIA_PRIVATE_ROOT || ".local-media/private",
+  };
+  const privateStorage = createMediaStorage(providerConf);
+  const repository = new PrismaMediaRepository(prisma);
+
+  _defaultIngestService = new DefaultMediaIngestService(
+    repository,
+    privateStorage,
+    privateKey,
+    PRODUCT_IMAGE_PROFILE_V1
+  );
+  return _defaultIngestService;
+}
+
+export function setMediaIngestService(service: MediaIngestService | null): void {
+  _defaultIngestService = service;
 }
