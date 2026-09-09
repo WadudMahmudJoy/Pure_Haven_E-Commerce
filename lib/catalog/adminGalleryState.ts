@@ -1,6 +1,12 @@
+import type { ProductGalleryWriteItem } from "./galleryWrite";
+
 export type AdminGalleryItem = {
   id: string;
   url: string;
+  managedMediaId?: string | null;
+  productImageId?: number | null;
+  sourceKind?: "MANAGED" | "LEGACY_LOCAL" | "LEGACY_EXTERNAL";
+  altText?: string | null;
 };
 
 /**
@@ -68,12 +74,37 @@ export function serializeGalleryPayload(
 ): {
   images: string[];
   image: string;
+  gallery?: ProductGalleryWriteItem[];
 } {
   if (!items || items.length === 0) {
     throw new Error("Cannot serialize empty gallery payload.");
   }
-  return {
+  const hasStructured = items.some((it) => Boolean(it.managedMediaId || it.productImageId));
+  const base = {
     images: items.map((item) => item.url),
     image: items[0].url,
+  };
+  if (!hasStructured) {
+    return base;
+  }
+  return {
+    ...base,
+    gallery: items.map((it) => {
+      if (it.managedMediaId) {
+        return {
+          kind: "managed" as const,
+          managedMediaId: it.managedMediaId,
+          ...(it.altText ? { altText: it.altText } : {}),
+        };
+      }
+      if (it.productImageId) {
+        return {
+          kind: "legacy-existing" as const,
+          productImageId: it.productImageId,
+          ...(it.altText ? { altText: it.altText } : {}),
+        };
+      }
+      throw new Error("Cannot serialize structured item without managedMediaId or productImageId.");
+    }),
   };
 }

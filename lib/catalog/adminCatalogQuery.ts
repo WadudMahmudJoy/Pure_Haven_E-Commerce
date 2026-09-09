@@ -135,7 +135,11 @@ export async function getAdminProductDetailQuery(
       images: {
         orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         select: {
+          id: true,
           url: true,
+          sourceKind: true,
+          managedMediaId: true,
+          altText: true,
         },
       },
     },
@@ -155,6 +159,13 @@ export async function getAdminProductDetailQuery(
       product.images.length > 0
         ? product.images.map((img) => img.url)
         : [product.image],
+    gallery: product.images.map((img) => ({
+      productImageId: img.id,
+      sourceKind: img.sourceKind as "MANAGED" | "LEGACY_LOCAL" | "LEGACY_EXTERNAL",
+      managedMediaId: img.managedMediaId,
+      altText: img.altText ?? "",
+      previewUrl: img.url,
+    })),
     category: product.category,
     categoryId: product.categoryId,
     subcategory: product.subcategory,

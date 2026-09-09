@@ -66,8 +66,17 @@ export type AdminProductVariantDTO = {
   sortOrder: number;
 };
 
+export type AdminProductGalleryItemDto = Readonly<{
+  productImageId: number;
+  sourceKind: "MANAGED" | "LEGACY_LOCAL" | "LEGACY_EXTERNAL";
+  managedMediaId: string | null;
+  altText: string;
+  previewUrl: string;
+}>;
+
 export type AdminProductDetailDTO = AdminProductListDTO & {
   images: string[];
+  gallery?: AdminProductGalleryItemDto[];
   description: string | null;
   deletedAt: string | null;
   updatedAt: string;

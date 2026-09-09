@@ -21,6 +21,7 @@ import {
   parseGalleryWriteIntent,
   applyGalleryMutation,
 } from "@/lib/catalog/galleryWrite";
+import { productMediaAttachmentService } from "@/lib/media/productMediaAttachmentService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -731,7 +732,20 @@ export async function DELETE(req: Request) {
     }
 
     // 3. No historical references -> safe hard delete
-    await prisma.product.delete({ where: { id } });
+    const attachedMedia = await prisma.productImage.findMany({
+      where: { productId: id, managedMediaId: { not: null } },
+      select: { managedMediaId: true },
+    });
+    const managedIds = attachedMedia
+      .map((m) => m.managedMediaId)
+      .filter((m): m is string => Boolean(m));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.product.delete({ where: { id } });
+      if (managedIds.length > 0) {
+        await productMediaAttachmentService.handleDetachedMedia(tx, managedIds);
+      }
+    });
     invalidateProductReadCache();
 
     return NextResponse.json({ success: true, softDeleted: false });
