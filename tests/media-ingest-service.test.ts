@@ -8,7 +8,7 @@ import {
   type StartProductImageIngestInput,
 } from "../lib/media/mediaIngestService";
 import { InMemoryMediaStorage } from "../lib/media/storage/inMemoryMediaStorage";
-import { PRODUCT_IMAGE_PROFILE_V1 } from "../lib/media/processingProfile";
+import { PRODUCT_IMAGE_PROFILE_V1, hashProcessingProfile } from "../lib/media/processingProfile";
 import type { PrismaClient } from "../generated/prisma/client";
 
 function sha256(bytes: Uint8Array): string {
@@ -222,5 +222,80 @@ describe("Task 15: Durable ManagedMedia Ingestion & Private Staging", () => {
       where: { ingestActorScope: actorScope, ingestIdempotencyKey: key },
     });
     assert.equal(count, 1);
+  });
+
+  it("Item 5: fails closed for NON-RETRYABLE failure: same key + same bytes does NOT reset FAILED state or re-arm run", async () => {
+    const key = `key-nonretryable-failed-${Date.now()}`;
+    const initial = await service.startProductImageIngest(makeInput(key, bytesA));
+
+    // Simulate a non-retryable failure (e.g. UNSUPPORTED_FORMAT or CORRUPTED_PAYLOAD during processing)
+    await prisma.managedMedia.update({
+      where: { id: initial.mediaId },
+      data: {
+        lifecycleState: "FAILED",
+        failurePhase: "PROCESSING",
+        failureCode: "UNSUPPORTED_FORMAT",
+      },
+    });
+    await prisma.mediaProcessingRun.updateMany({
+      where: { managedMediaId: initial.mediaId },
+      data: {
+        state: "FAILED",
+        failurePhase: "PROCESSING",
+        failureCode: "UNSUPPORTED_FORMAT",
+      },
+    });
+
+    // Verify BEFORE STATE
+    const beforeMedia = await prisma.managedMedia.findUnique({
+      where: { id: initial.mediaId },
+      include: { processingRuns: true },
+    });
+    assert.equal(beforeMedia?.lifecycleState, "FAILED");
+    assert.equal(beforeMedia?.failureCode, "UNSUPPORTED_FORMAT");
+    assert.equal(beforeMedia?.processingRuns[0]?.state, "FAILED");
+
+    // RETRY ATTEMPT: Ingest with same key and same bytes must FAIL CLOSED
+    const retried = await service.startProductImageIngest(makeInput(key, bytesA));
+    assert.equal(retried.mediaId, initial.mediaId);
+    assert.equal(retried.lifecycleState, "FAILED");
+    assert.equal(retried.attachable, false);
+
+    // Verify AFTER STATE: lifecycleState remains FAILED, failureCode preserved, run state remains FAILED
+    const afterMedia = await prisma.managedMedia.findUnique({
+      where: { id: initial.mediaId },
+      include: { processingRuns: true },
+    });
+    assert.equal(afterMedia?.lifecycleState, "FAILED");
+    assert.equal(afterMedia?.failureCode, "UNSUPPORTED_FORMAT");
+    assert.equal(afterMedia?.processingRuns[0]?.state, "FAILED");
+  });
+
+  it("Item 6: pins profileVersion and profileDefinitionHash to immutable profile and preserves hash across retries", async () => {
+    const key = `key-profile-pinning-${Date.now()}`;
+    const expectedProfileVersion = PRODUCT_IMAGE_PROFILE_V1.version; // "product-image-v1"
+    const expectedProfileHash = hashProcessingProfile(PRODUCT_IMAGE_PROFILE_V1);
+
+    // 1. Initial Ingest
+    const initial = await service.startProductImageIngest(makeInput(key, bytesA));
+    assert.ok(initial.mediaId);
+
+    const initialRun = await prisma.mediaProcessingRun.findFirst({
+      where: { managedMediaId: initial.mediaId },
+    });
+    assert.ok(initialRun, "MediaProcessingRun must exist");
+    assert.equal(initialRun.profileVersion, expectedProfileVersion);
+    assert.equal(initialRun.profileDefinitionHash, expectedProfileHash);
+
+    // 2. Retry / Idempotent call
+    const retried = await service.startProductImageIngest(makeInput(key, bytesA));
+    assert.equal(retried.mediaId, initial.mediaId);
+
+    const retriedRun = await prisma.mediaProcessingRun.findFirst({
+      where: { managedMediaId: initial.mediaId },
+    });
+    assert.ok(retriedRun);
+    assert.equal(retriedRun.profileVersion, expectedProfileVersion);
+    assert.equal(retriedRun.profileDefinitionHash, expectedProfileHash);
   });
 });

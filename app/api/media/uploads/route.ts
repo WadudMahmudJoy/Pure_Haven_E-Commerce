@@ -4,6 +4,7 @@ import { requireAdmin, getAdminSessionFromRequest } from "@/lib/adminSession";
 import { isManagedMediaIngestionEnabled } from "@/lib/media/config";
 import { validateProductImageUploadEnvelope } from "@/lib/media/imageProcessor";
 import { getMediaIngestService } from "@/lib/media/mediaIngestService";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,14 +61,40 @@ export async function POST(req: Request) {
       );
     }
 
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    // Authoritative extracted byte-length check
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { success: false, message: "Image must be 5 MB or smaller." },
+        { status: 413 }
+      );
+    }
+
     const session = getAdminSessionFromRequest(req);
-    const actorScope = session ? session.email : "admin";
+    if (!session) {
+      return NextResponse.json(
+        { success: false, message: "Admin login required." },
+        { status: 401 }
+      );
+    }
+
+    const admin = await prisma.adminCredential.findUnique({
+      where: { email: session.email },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Admin account not found." },
+        { status: 401 }
+      );
+    }
+    const actorScope = `admin-${admin.id}`;
+
     const idempotencyKey =
       formData.get("idempotencyKey")?.toString() ||
       req.headers.get("idempotency-key") ||
       randomUUID();
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
     const declaredMimeType = file.type;
     const originalFilename = file.name;
 

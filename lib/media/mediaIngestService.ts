@@ -82,22 +82,28 @@ export class DefaultMediaIngestService implements MediaIngestService {
       }
 
       // Check retryable failure state
-      if (
-        media.lifecycleState === "FAILED" &&
-        isRetryableInitialIngestFailure(media.failureCode)
-      ) {
-        const head = await this.privateStorage.headObject(media.stagingObjectKey);
-        if (!head || head.checksumSha256 !== sha) {
-          throw new Error("RETRY_STAGING_UNAVAILABLE: Staging object missing or corrupted for retry");
+      if (media.lifecycleState === "FAILED") {
+        if (isRetryableInitialIngestFailure(media.failureCode)) {
+          const head = await this.privateStorage.headObject(media.stagingObjectKey);
+          if (!head || head.checksumSha256 !== sha) {
+            throw new Error("RETRY_STAGING_UNAVAILABLE: Staging object missing or corrupted for retry");
+          }
+          const resetMedia = await this.repository.resetInitialRunForRetry(media.id);
+          return {
+            mediaId: resetMedia.id,
+            lifecycleState: resetMedia.lifecycleState,
+            attachable: canAttachManagedMedia(
+              resetMedia.lifecycleState,
+              resetMedia.deliveryDisabledAt
+            ),
+          };
         }
-        const resetMedia = await this.repository.resetInitialRunForRetry(media.id);
+
+        // Non-retryable failure: fail-closed, do not alter run, do not write staging, return existing failed state
         return {
-          mediaId: resetMedia.id,
-          lifecycleState: resetMedia.lifecycleState,
-          attachable: canAttachManagedMedia(
-            resetMedia.lifecycleState,
-            resetMedia.deliveryDisabledAt
-          ),
+          mediaId: media.id,
+          lifecycleState: media.lifecycleState,
+          attachable: canAttachManagedMedia(media.lifecycleState, media.deliveryDisabledAt),
         };
       }
 

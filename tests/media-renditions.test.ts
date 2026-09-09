@@ -10,7 +10,7 @@ import {
   PRODUCT_IMAGE_PROFILE_V1,
   type ProductImageProcessingProfile,
 } from "../lib/media/processingProfile";
-import { createPhase6MediaFixture } from "./helpers/mediaFixtures";
+import { createPhase6MediaFixture, type MediaFixtureKind } from "./helpers/mediaFixtures";
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -118,5 +118,90 @@ describe("Task 14: Responsive Rendition Generation (WebP + AVIF)", () => {
         `Height ${rendition.height} should match expected ${expectedHeight} within 1px`
       );
     }
+  });
+
+  it("Item 9: processes all 6 Task-2 fixture classes through full pipeline and asserts security & quality invariants", async () => {
+    const fixtureKinds: MediaFixtureKind[] = [
+      "photo",
+      "text-packaging",
+      "fine-texture",
+      "dark-gradient",
+      "transparent",
+      "icc-profile",
+    ];
+
+    for (const kind of fixtureKinds) {
+      const width = 1000;
+      const height = 750;
+      const rawBytes = await createPhase6MediaFixture(kind, width, height);
+
+      const result = await processor.processInitialProductImage(
+        { bytes: rawBytes, declaredMimeType: "image/png" },
+        PRODUCT_IMAGE_PROFILE_V1
+      );
+
+      // 1. Assert Canonical Master
+      assert.equal(result.canonicalMaster.role, "MASTER");
+      assert.equal(result.canonicalMaster.accessClass, "PRIVATE_SOURCE");
+      assert.equal(result.canonicalMaster.mimeType, "image/webp");
+      assert.equal(result.canonicalMaster.width, width);
+      assert.equal(result.canonicalMaster.height, height);
+
+      // 2. Assert Renditions
+      assert.ok(result.renditions.length > 0);
+      const expectedWidths = [320, 640, 960, 1000]; // useful subset without upscaling
+
+      const webpRenditions = result.renditions.filter((r) => r.mimeType === "image/webp");
+      const avifRenditions = result.renditions.filter((r) => r.mimeType === "image/avif");
+
+      assert.deepEqual(
+        webpRenditions.map((r) => r.width).sort((a, b) => a - b),
+        expectedWidths
+      );
+      assert.deepEqual(
+        avifRenditions.map((r) => r.width).sort((a, b) => a - b),
+        expectedWidths
+      );
+
+      for (const rendition of result.renditions) {
+        assert.equal(rendition.role, "RENDITION");
+        assert.equal(rendition.accessClass, "PUBLIC_DELIVERY");
+        assert.ok(rendition.width <= width, "Never upscaled");
+        assert.notEqual(rendition.sha256, result.canonicalMaster.sha256, "Master bytes never leaked in delivery");
+
+        const meta = await sharp(rendition.bytes).metadata();
+        assert.ok(meta.width && meta.height);
+        assert.equal(meta.space, "srgb", "All renditions normalized to srgb");
+
+        // Specific fixture class assertions
+        if (kind === "transparent") {
+          assert.equal(meta.hasAlpha, true, "Alpha must be preserved in transparent fixture renditions");
+        }
+      }
+    }
+  });
+
+  it("Item 9: proves rendition generator consumes profile authority directly without duplicated constants", async () => {
+    const master = await createMaster(1200, 800);
+
+    // Profile with custom non-standard widths and only webp
+    const customProfile: ProductImageProcessingProfile = {
+      ...PRODUCT_IMAGE_PROFILE_V1,
+      version: "custom-dynamic-profile-v1",
+      widths: [400, 750],
+      enabledDeliveryFormats: ["webp"],
+      webpQuality: 82,
+      avifQuality: null,
+    };
+
+    const renditions = await processor.generateDeliveryRenditions(master, customProfile);
+
+    // Assert generator obeyed the profile's widths exactly
+    assert.deepEqual(
+      renditions.map((r) => r.width).sort((a, b) => a - b),
+      [400, 750]
+    );
+    // Assert only WebP was produced as configured
+    assert.ok(renditions.every((r) => r.mimeType === "image/webp"));
   });
 });

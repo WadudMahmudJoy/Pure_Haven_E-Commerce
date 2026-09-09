@@ -326,5 +326,91 @@ describe("Task 13: Media Admission Validation & Canonical Master Security", () =
       const masterMeta = await sharp(result.canonicalMaster.bytes).metadata();
       assert.equal(masterMeta.space, "srgb");
     });
+
+    it("Item 7 (Option A): decodes genuine AVIF source input, enforces security bounds, and produces canonical lossless WebP PRIVATE_SOURCE master", async () => {
+      const avifBuffer = await sharp({
+        create: { width: 120, height: 90, channels: 3, background: { r: 60, g: 140, b: 220 } },
+      }).avif({ quality: 80 }).toBuffer();
+
+      const input: ProductImageSourceInput = {
+        bytes: new Uint8Array(avifBuffer),
+        declaredMimeType: "image/avif",
+      };
+
+      // 1. Envelope admission
+      const env = validateProductImageUploadEnvelope(input);
+      assert.equal(env.normalizedMimeType, "image/avif");
+      assert.equal(env.detectedContainer, "avif");
+
+      // 2. Full processing pipeline
+      const result = await processor.processInitialProductImage(input, profile);
+      const master = result.canonicalMaster;
+
+      // 3. Security invariants on canonical master
+      assert.equal(master.role, "MASTER");
+      assert.equal(master.accessClass, "PRIVATE_SOURCE");
+      assert.equal(master.variantKey, "master");
+      assert.equal(master.mimeType, "image/webp");
+      assert.equal(master.width, 120);
+      assert.equal(master.height, 90);
+      assert.equal(master.sha256, sha256(master.bytes));
+
+      // 4. Verify decoded master is valid lossless WebP
+      const meta = await sharp(master.bytes).metadata();
+      assert.equal(meta.format, "webp");
+      assert.equal(meta.width, 120);
+      assert.equal(meta.height, 90);
+      assert.equal(meta.space, "srgb");
+
+      // 5. Verify renditions were produced
+      assert.ok(result.renditions.length > 0);
+      for (const rendition of result.renditions) {
+        assert.equal(rendition.role, "RENDITION");
+        assert.equal(rendition.accessClass, "PUBLIC_DELIVERY");
+      }
+    });
+
+    it("Item 8A: converts SDR input with embedded ICC profile deterministically to sRGB", async () => {
+      const iccBuffer = await createPhase6MediaFixture("icc-profile", 80, 80);
+      const input: ProductImageSourceInput = {
+        bytes: iccBuffer,
+        declaredMimeType: "image/png",
+      };
+
+      const result = await processor.processInitialProductImage(input, profile);
+      const masterMeta = await sharp(result.canonicalMaster.bytes).metadata();
+      assert.equal(masterMeta.space, "srgb");
+      assert.equal(masterMeta.channels, 3);
+      assert.equal(masterMeta.icc, undefined);
+    });
+
+    it("Item 8B: HDR / high bit-depth policy converts safely to 8-bit sRGB canonical master without clipping failure", async () => {
+      const png16Buffer = await sharp({
+        create: { width: 64, height: 64, channels: 3, background: { r: 120, g: 180, b: 240 } },
+      })
+        .toColourspace("rgb16")
+        .png()
+        .toBuffer();
+
+      const inMeta = await sharp(png16Buffer).metadata();
+      assert.equal(inMeta.space, "rgb16");
+      assert.equal(inMeta.depth, "ushort");
+
+      const input: ProductImageSourceInput = {
+        bytes: new Uint8Array(png16Buffer),
+        declaredMimeType: "image/png",
+      };
+
+      const result = await processor.processInitialProductImage(input, profile);
+      const master = result.canonicalMaster;
+      const masterMeta = await sharp(master.bytes).metadata();
+
+      assert.equal(master.role, "MASTER");
+      assert.equal(master.accessClass, "PRIVATE_SOURCE");
+      assert.equal(masterMeta.space, "srgb");
+      assert.equal(masterMeta.depth, "uchar");
+      assert.equal(master.width, 64);
+      assert.equal(master.height, 64);
+    });
   });
 });
