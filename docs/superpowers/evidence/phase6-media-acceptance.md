@@ -236,3 +236,231 @@ Authoritative real-browser testing was executed via Chrome DevTools Protocol (CD
 - **SHA-256**: `6dad053399e00c6e9ed44b0abd3a5dcd2b0c487181626c256bdf46dc68458352`
 - **Total Files**: 28 (8 screenshots, 4 network/execution JSON reports, 16 comparison fixtures)
 - **Pre-ZIP Secret Scan**: 0 findings across all bundled assets (synthetic canary verified active).
+
+---
+
+## 7. Task 25 Comprehensive Acceptance Bundle & Final Readiness Gate
+
+### A. Architectural & Persistence Foundation
+- **Locked Specification**: `docs/superpowers/specs/2026-09-04-phase-6-media-infrastructure-design.md`
+  - SHA256: `6d528f2730c1d0a195ededea5bd7987f4c0770bc2b3db7759041212bea7a501a` (**VERIFIED**)
+- **Locked Implementation Plan**: `docs/superpowers/plans/2026-09-05-phase-6-media-infrastructure.md`
+  - SHA256: `3a207c0ab37fbbc1a69eb1d275588d49a43597655505d0c23bbe0788266302a5` (**VERIFIED**)
+- **Effective Persistence Contract**: Based on the 5 Phase-6 migrations:
+  1. `20260905010000_phase6_media_expand`
+  2. `20260905020000_phase6_product_image_classification`
+  3. `20260905030000_phase6_media_contract`
+  4. `20260905030100_phase6_bounded_columns`
+  5. `20260905030200_phase6_persistence_contract_corrections`
+- **Contract Baseline Commit**: `0ba716a4af049e960999b378b11951d83f2b9db8`
+- **Persistence Shape Invariants**: UUID foreign key definitions; `RESTRICT` deletion rules on media history relations; no redundant `MediaObject.managedMediaId`; `Product` → `ProductImage` cascade preserved; provider keys stored as neutral strings; bounded `failureCode` (64 chars) and `originalFilename` (255 chars); tombstoned history retention; canonical master explicit authority.
+- **Shared Schema Incident Gate**: `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT` — FIVE PHASE-6 MIGRATIONS were applied early to shared Neon. Schema is consistent (`INCIDENT_SCHEMA_CONSISTENT`); zero shared DB mutations executed.
+- **Historical Checksum Gate**: `MISMATCH_UNRESOLVED` — historical migration `20260526183231_sync_current_schema_security_fix` local SHA256 `6ebbf1104c5fd06f0414e7ee01b6f8ebfbe340334e1dfed14d610337d104669c` differs from Neon recorded `ac0c8d8f465e09a5e69c1d4330668e5a320e03392ed4e47105d4355b6ac57013`. Gate remains open without speculative editing of migration history.
+
+---
+
+### B. Acceptance Dimension A — Security Audit Matrix
+
+| Security Domain | Invariant / Requirement | Verification Test | Result | Supporting Evidence / Implementation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Upload Security** | Magic-byte signature & MIME admission | `tests/media-image-security.test.ts` | **PASS** | Rejects spoofed extension/MIME before byte ingest |
+| **Upload Security** | Full Sharp decode admission check | `tests/media-image-security.test.ts` | **PASS** | Validates complete decode pipeline via libvips |
+| **Upload Security** | Single-frame image enforcement | `tests/media-image-security.test.ts` | **PASS** | Rejects multi-page/animated evasion payloads |
+| **Upload Security** | 40 MP total pixel upper bound | `tests/media-image-security.test.ts` | **PASS** | Guard blocks decompression bomb attacks |
+| **Upload Security** | 12,000 px max axis dimension bound | `tests/media-image-security.test.ts` | **PASS** | Rejects pathological aspect-ratio vectors |
+| **Upload Security** | Authoritative 5,242,880-byte payload limit | `tests/media-upload-route.test.ts` | **PASS** | Enforces byte limit before body streaming and on extracted files |
+| **Upload Security** | EXIF orientation normalization | `tests/media-image-security.test.ts` | **PASS** | Auto-rotates orientation flags deterministically |
+| **Upload Security** | Standard sRGB color normalization | `tests/media-image-security.test.ts` | **PASS** | Converts arbitrary color profiles to standard sRGB |
+| **Upload Security** | Metadata stripping (EXIF/IPTC/XMP) | `tests/media-image-security.test.ts` | **PASS** | Strips private tags and camera metadata |
+| **Upload Security** | No generated upscale beyond source | `tests/media-renditions.test.ts` | **PASS** | Omits renditions larger than input dimensions |
+| **Upload Security** | Canonical private master retention | `tests/media-ingest-service.test.ts` | **PASS** | Master stored under `PRIVATE_SOURCE` access class |
+| **Access / Leak** | No `PRIVATE_SOURCE` in public DTO | `tests/public-managed-media-query.test.ts` | **PASS** | Public projections select only `PUBLIC_DELIVERY` |
+| **Access / Leak** | No canonical master in DOM/network | `tests/media-real-browser-qa.test.ts` | **PASS** | Scanned DOM and network traffic: 0 master leaks |
+| **Access / Leak** | No staging paths on public/admin UI | `tests/media-real-browser-qa.test.ts` | **PASS** | Staging object keys absent from rendered HTML |
+| **Access / Leak** | Storage provider keys absent from client | `tests/media-delivery-contract.test.ts` | **PASS** | `storageProviderKey` never exposed in client contracts |
+| **Access / Leak** | Secret credentials absent from bundle | `tests/media-real-browser-qa.test.ts` | **PASS** | Secret scanner: 0 findings across all evidence files |
+| **Access / Leak** | Suspended media suppressed from public | `tests/public-managed-media-query.test.ts` | **PASS** | `deliveryDisabledAt` suppresses managed item |
+| **Access / Leak** | Server-authoritative Admin actor scope | `tests/media-upload-route.test.ts` | **PASS** | Derives `actorScope` strictly from verified admin session |
+| **Access / Leak** | Client-supplied actor spoofing ignored | `tests/media-upload-route.test.ts` | **PASS** | Request body actor injection is ignored |
+| **Storage** | Atomic create-if-absent semantics | `tests/media-s3-storage.test.ts` | **PASS** | Uses `If-None-Match: *` / fail-closed create |
+| **Storage** | Same-key same-content idempotency | `tests/media-storage-contract.test.ts` | **PASS** | Matching sha256 + byte size returns success |
+| **Storage** | Same-key different-content conflict | `tests/media-storage-contract.test.ts` | **PASS** | Reject conflicting payload with `CONFLICT` / `INTEGRITY_MISMATCH` |
+| **Storage** | Path traversal prevention | `tests/media-local-storage.test.ts` | **PASS** | Resolves within root, throws `SECURITY_VIOLATION` |
+| **Storage** | Production storage fail-closed | `tests/media-s3-storage.test.ts` | **PASS** | Typed error mapping, zero credential leakage |
+| **Storage** | No local-provider fallback in production | `lib/media/storage/index.ts` | **PASS** | Throws on invalid configuration, no silent downgrade |
+| **Telemetry** | Redaction of tokens, keys, and URLs | `tests/media-operations-telemetry.test.ts` | **PASS** | Masks auth headers, AWS keys, and signed query params |
+
+---
+
+### C. Acceptance Dimension B — Premium Visual Quality Matrix
+
+Detailed inspection of the 8 real-browser viewport screenshots in `artifacts/phase6-media-browser/screenshots/`:
+
+| File | Viewport | DPR | Broken Image | Stretching | Unexpected Crop | Overflow | Text Readability | Texture | Gradient | Transparency | Layout & Alignment |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `desktop-1280x800-shop.png` | 1280x800 | 1 | None | None | None | None | High | Clean | Smooth | Preserved | 4-column balanced grid, clean pagination |
+| `desktop-1280x800-admin-managed-gallery.png` | 1280x800 | 1 | None | None | None | None | Crisp | N/A | N/A | N/A | Admin edit form, preview cards, reordering UI |
+| `desktop-1280x800-pdp.png` | 1280x800 | 1 | None | None | None | None | High | Crisp | Smooth | Clean | Side-by-side gallery and commerce summary |
+| `highdpi-1280x800-pdp.png` | 1280x800 | 2 | None | None | None | None | Crisp (2x) | Intricate (1500w) | Banding-free | Clean | Side-by-side gallery, high-density clarity |
+| `tablet-768x1024-shop.png` | 768x1024 | 1 | None | None | None | None | Clear | Sharp | Smooth | Preserved | 3-column tablet grid, clean spacing |
+| `tablet-768x1024-pdp.png` | 768x1024 | 1 | None | None | None | None | Clear | Sharp | Clean | Clean | Stacked responsive layout, full-width details |
+| `mobile-390x844-shop.png` | 390x844 | 2 | None | None | None | None | Legible | Sharp (400w) | Smooth | Intact | 2-column mobile cards, compact layout |
+| `mobile-390x844-pdp.png` | 390x844 | 2 | None | None | None | None | Clear | Sharp (400w/800w)| Smooth | Intact | Full-width responsive product hero image |
+
+- **Representative Visual Fixture Classes Verified**: `photo`, `text-packaging`, `fine-texture`, `dark-gradient`, `transparent`, and `icc-profile` (`tests/media-fixtures.test.ts`, `tests/media-browser-network-qa.test.ts`).
+- **Bounded Quality Observation**: Images render without visible compression artifacts, edge ringing, or color banding. No claims of uncalibrated laboratory color accuracy are asserted.
+
+---
+
+### D. Acceptance Dimension C — Responsive Delivery Performance
+
+- **AVIF Preference**: Modern `<picture>` element specifies `type="image/avif"` source sets prior to `type="image/webp"` source sets.
+- **WebP Fallback**: WebP candidate sets and standard `<img>` fallback guarantee universal client compatibility.
+- **Authentic Width Descriptors**: All `srcset` declarations reference only existing, generated renditions (`400w`, `800w`, `1200w`, `1500w`), preventing invalid candidate selection.
+- **Responsive Sizes Declarations**:
+  - `ProductCard`: `(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw`
+  - `ProductDetailsClient`: `(max-width: 768px) 100vw, 50vw`
+- **Sub-Maximal Selection Proof**: In Chrome, mobile (153px rendered width) and tablet (321px rendered width) selected `rendition-400.avif` rather than maximal candidates (1500w).
+- **High-DPI 2x Selection Proof**: At 1280x800 DPR 2, PDP selected `rendition-1500.avif` for crisp 2x retina display.
+- **Network Lazy Loading Proof**:
+  - Offscreen catalog card: **0 requests** prior to scroll; **1 request** logged following `scrollIntoView`.
+  - Carousel secondary slide: **0 requests** on initial load; requested only upon user navigation click.
+- **Read-Path Efficiency**: Normal catalog reads execute **zero external provider calls** (pure database projection + direct static asset URL resolution).
+- **Local Cache Evaluation**: `LOCAL_HTTP_IMMUTABLE_CACHE = NOT PROVEN` (Next.js local static file server emits `Cache-Control: public, max-age=0`). Immutable caching remains verified at the storage adapter level.
+
+---
+
+### E. Acceptance Dimension D — Lifecycle & Recovery Safety Matrix
+
+| Lifecycle / Recovery Invariant | Verification Test | Result | Supporting Evidence / Implementation |
+| :--- | :--- | :--- | :--- |
+| Atomic lease claim with timeout | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Claims lease atomically with lease expiration timestamp |
+| Healthy unexpired lease protection | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Prevents concurrent runner from stealing active lease |
+| Expired lease recovery / reclaim | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Reclaims orphaned lease after timeout expires |
+| Owner-only run completion / failure | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Rejects status updates from expired/non-leaseholders |
+| Initial processing pipeline | `tests/media-ingest-service.test.ts` | **PASS** | Transitions `PENDING` → `PROCESSING` → `READY` |
+| Mandatory valid inventory gate | `tests/media-renditions.test.ts` | **PASS** | `READY` state strictly requires complete rendition set |
+| `COMPLETE` != `ACTIVE` separation | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Run completion does not alter active run pointer automatically |
+| Failed regeneration retains active | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Failed background regeneration leaves prior active run intact |
+| Suspended media activation blocked | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | `deliveryDisabledAt` blocks activation of run |
+| Recovery A: Stale lease timeout | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Recovers processing runs stuck in progress |
+| Recovery B: Atomic activation + mirror | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Atomic candidate activation, mirror refresh, suspension clear |
+| Cleanup scheduling on detachment | `tests/product-managed-media-write.test.ts` | **PASS** | Detached media marked `CLEANUP_PENDING` with grace timestamp |
+| Reattachment during grace window | `tests/product-managed-media-write.test.ts` | **PASS** | Restores `CLEANUP_PENDING` to `READY`, clears deletion timer |
+| `DELETING` state nonattachable | `tests/product-managed-media-write.test.ts` | **PASS** | Prevents attachment of media currently undergoing physical delete |
+| Canonical master protection | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Inactive profile cleanup never deletes canonical master |
+| Tombstone DB history retention | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Preserves database records marked `DELETED` after storage delete |
+| Missing physical delete idempotent | `tests/media-storage-contract.test.ts` | **PASS** | Deleting already-absent object succeeds cleanly |
+| Provider delete failure retryable | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Increments retry counter, schedules subsequent reconciliation |
+| Staging file reconciliation | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Purges orphaned staging uploads beyond retention window |
+| Integrity mismatch fail-closed | `tests/media-storage-contract.test.ts` | **PASS** | Checksum mismatch rejects write without storage mutation |
+| Final transaction revalidation | `tests/product-managed-media-write.test.ts` | **PASS** | Re-checks lifecycle and suspension inside DB transaction |
+| Zero-provider Product write | `tests/product-managed-media-write.test.ts` | **PASS** | Product gallery mutations make zero external storage calls |
+| Suspension attach race rejection | `tests/product-managed-media-write.test.ts` | **PASS** | Concurrent suspension during save rolls back attachment |
+| Detach cleanup scheduling | `tests/product-managed-media-write.test.ts` | **PASS** | Removing image from gallery transitions media to `CLEANUP_PENDING` |
+
+---
+
+### F. Acceptance Dimension E — Provider & Persistence Portability
+
+- **Uniform Storage Contract**: `InMemoryMediaStorage`, `LocalMediaStorage`, and `S3CompatibleMediaStorage` implement the identical `MediaStorage` interface (`tests/media-storage-contract.test.ts`, `tests/media-local-storage.test.ts`, `tests/media-s3-storage.test.ts`).
+- **S3 Protocol Conformance**: Generic conditional `If-None-Match: *`, safe concurrent same-content idempotency, conflicting-content conflict rejection (`tests/media-s3-storage.test.ts`).
+- **Provider Neutrality**: Neutral `storageProviderKey` strings; immutable object keys based on SHA-256 and object role; zero Cloudflare-specific schema constructs.
+- **Disaster Recovery Model**: PostgreSQL metadata + private canonical masters + deterministic processing profile version/hash enables 100% automated regeneration of public delivery renditions.
+- **Provider Migration Protocol**: Documented five-stage migration runbook: `COPY → VERIFY → CUTOVER → SOAK → RETIRE` (`docs/runbooks/media-operations.md`).
+- **Cloudflare R2 Status**: `R2_INTEGRATION_PENDING` — live isolated non-production credentials not yet provisioned; no simulated live proof claimed.
+
+---
+
+### G. Consolidated Acceptance Test Suite Results
+
+#### 1. Mandatory Media Fixtures Gate (Plan Step 1)
+- **Command**: `npx tsx --test --test-concurrency=1 tests/media-fixtures.test.ts`
+- **Total Tests**: 3
+- **Passed**: 3
+- **Failed**: 0
+- **Exit Code**: 0
+- **Duration**: 522.2027ms
+
+#### 2. Consolidated Phase-6 Media Acceptance Suite (Plan Step 1 Consolidated)
+- **Command**: `npx tsx --test --test-concurrency=1 tests/media-domain.test.ts tests/media-fixtures.test.ts tests/media-image-security.test.ts tests/media-processing-profile.test.ts tests/media-renditions.test.ts tests/media-delivery-contract.test.ts tests/media-storage-contract.test.ts tests/media-local-storage.test.ts tests/media-s3-storage.test.ts tests/media-r2-integration.test.ts tests/media-ingest-service.test.ts tests/media-lifecycle-reconciliation.test.ts tests/media-upload-route.test.ts tests/product-managed-media-write.test.ts tests/product-card-responsive-media.test.ts tests/product-detail-responsive-media.test.ts tests/public-managed-media-query.test.ts tests/media-operations-telemetry.test.ts tests/media-browser-network-qa.test.ts`
+- **Suites**: 34
+- **Total Tests**: 196
+- **Passed**: 196
+- **Failed**: 0
+- **Exit Code**: 0
+- **Duration**: 46022.8086ms (~46.0s)
+- **R2 Diagnostic Suite**: `tests/media-r2-integration.test.ts` passed in diagnostic mode recording `R2_INTEGRATION_PENDING`.
+
+#### 3. Real Browser QA Suite (Task 24 CDP)
+- **Command**: `npx tsx --test --test-concurrency=1 tests/media-real-browser-qa.test.ts`
+- **Total Tests**: 10
+- **Passed**: 10
+- **Failed**: 0
+- **Exit Code**: 0
+- **Duration**: ~42.9s
+
+#### 4. Authoritative Full Repository Regression
+- **Baseline Commit**: `0a57b827450354e119c08057fff3f4d9a16c111f`
+- **Total Tests**: 966
+- **Passed**: 966
+- **Failed**: 0
+- **Exit Code**: 0
+- **Duration**: ~5m 24.8s
+- **Status**: Retained from current-HEAD full regression because no executable application/test code was modified.
+
+#### 5. Production Build Verification
+- **Command**: `$env:NEXT_CPU_COUNT='1'; npm run build`
+- **Exit Code**: 0
+- **Routes Generated**: 49 / 49 routes
+- **Status**: Retained from Batch-8 baseline verification.
+
+---
+
+### H. Owner Manual Review Checklist
+
+The complete visual and network evidence bundle is packaged and verified at:
+- **Repository Path**: `artifacts/phase6-media-browser.zip`
+- **User Downloads Path**: `C:\Users\wadud\Downloads\phase6-media-browser.zip`
+- **SHA-256**: `6dad053399e00c6e9ed44b0abd3a5dcd2b0c487181626c256bdf46dc68458352`
+
+**Manual Inspection Views**:
+1. [ ] Mobile Shop (`mobile-390x844-shop.png`): 2-column catalog grid, no horizontal overflow.
+2. [ ] Tablet Shop (`tablet-768x1024-shop.png`): 3-column catalog grid, clean card alignment.
+3. [ ] Desktop Shop (`desktop-1280x800-shop.png`): 4-column catalog grid, sharp typography.
+4. [ ] Mobile PDP (`mobile-390x844-pdp.png`): Full-width product image, responsive actions.
+5. [ ] Tablet PDP (`tablet-768x1024-pdp.png`): Stacked detail gallery and commerce summary.
+6. [ ] Desktop PDP (`desktop-1280x800-pdp.png`): Side-by-side gallery and commerce summary.
+7. [ ] High-DPI PDP (`highdpi-1280x800-pdp.png`): 2x retina clarity with 1500w rendition.
+8. [ ] Desktop Admin Managed Gallery (`desktop-1280x800-admin-managed-gallery.png`): Admin edit form, preview cards, reorder controls.
+
+**Owner Review Questions**:
+- Are there any broken images or missing icons?
+- Is there any unwanted image stretching or distortion?
+- Are any image crops unexpected or clipping essential subject matter?
+- Is there any text overlap or typography clipping?
+- Is horizontal overflow completely absent on all viewports?
+- Is the carousel navigation intuitive and usable?
+- Is the PDP gallery clean and stable across thumbnail changes?
+- Is the Admin gallery management UI clear and usable?
+- Are fine textures, dark gradients, packaging text, and transparent backgrounds rendered faithfully?
+
+**Owner Manual Gate Status**: `OWNER_MANUAL_GATE = PENDING` (awaiting human owner review).
+
+---
+
+### I. Phase 6 Final Readiness Classification
+
+```text
+TASK 25 CLASSIFICATION: NOT_READY
+REASON: REAL_PROVIDER_INTEGRATION_PENDING
+```
+
+**Active Hard Gates Summary**:
+1. `REAL_PROVIDER_INTEGRATION_PENDING`: Live non-production Cloudflare R2 credentials/buckets not yet provisioned; implementation is verified against local and S3-compatible abstractions.
+2. `PRODUCTION_DIRECT_DELIVERY=OPEN`: Production custom delivery domain and CDN edge distribution pending provider provisioning.
+3. `MISMATCH_UNRESOLVED`: Historical migration `20260526183231_sync_current_schema_security_fix` checksum mismatch on shared Neon remains open.
+4. `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT`: FIVE PHASE-6 MIGRATIONS were applied early to shared Neon; schema is consistent and untouched.
+5. `OWNER_MANUAL_GATE = PENDING`: Awaiting human owner visual inspection of evidence bundle.
+
+**Phase 6 Rollout Status**: Production rollout and Task 26 remain **NOT AUTHORIZED**.
