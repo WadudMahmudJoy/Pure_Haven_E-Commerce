@@ -253,7 +253,9 @@ Authoritative real-browser testing was executed via Chrome DevTools Protocol (CD
   4. `20260905030100_phase6_bounded_columns`
   5. `20260905030200_phase6_persistence_contract_corrections`
 - **Contract Baseline Commit**: `0ba716a4af049e960999b378b11951d83f2b9db8`
-- **Persistence Shape Invariants**: UUID foreign key definitions; `RESTRICT` deletion rules on media history relations; no redundant `MediaObject.managedMediaId`; `Product` → `ProductImage` cascade preserved; provider keys stored as neutral strings; bounded `failureCode` (64 chars) and `originalFilename` (255 chars); tombstoned history retention; canonical master explicit authority.
+- **Persistence Shape Invariants**: UUID foreign key definitions; `RESTRICT` deletion rules on media history relations; no redundant `MediaObject.managedMediaId`; `Product` → `ProductImage` cascade preserved; provider keys stored as neutral strings; bounded `failureCode` (`VarChar(100)`) and `originalFilename` (`VarChar(255)`); tombstoned history retention; canonical master explicit authority.
+- **Persistence Contract (Local / Implemented)**: **PASS**
+- **Shared Migration / Rollout Readiness**: **BLOCKED / INCIDENT-AWARE** (blocked by `MISMATCH_UNRESOLVED` and requires incident-awareness for `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT`)
 - **Shared Schema Incident Gate**: `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT` — FIVE PHASE-6 MIGRATIONS were applied early to shared Neon. Schema is consistent (`INCIDENT_SCHEMA_CONSISTENT`); zero shared DB mutations executed.
 - **Historical Checksum Gate**: `MISMATCH_UNRESOLVED` — historical migration `20260526183231_sync_current_schema_security_fix` local SHA256 `6ebbf1104c5fd06f0414e7ee01b6f8ebfbe340334e1dfed14d610337d104669c` differs from Neon recorded `ac0c8d8f465e09a5e69c1d4330668e5a320e03392ed4e47105d4355b6ac57013`. Gate remains open without speculative editing of migration history.
 
@@ -343,7 +345,7 @@ Detailed inspection of the 8 real-browser viewport screenshots in `artifacts/pha
 | `COMPLETE` != `ACTIVE` separation | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Run completion does not alter active run pointer automatically |
 | Failed regeneration retains active | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Failed background regeneration leaves prior active run intact |
 | Suspended media activation blocked | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | `deliveryDisabledAt` blocks activation of run |
-| Recovery A: Stale lease timeout | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Recovers processing runs stuck in progress |
+| Recovery A: Delivery suspension recovery | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | While media is suspended, validates that existing active processing run and its required public delivery inventory remain safe and complete, then clears deliveryDisabledAt |
 | Recovery B: Atomic activation + mirror | `tests/media-lifecycle-reconciliation.test.ts` | **PASS** | Atomic candidate activation, mirror refresh, suspension clear |
 | Cleanup scheduling on detachment | `tests/product-managed-media-write.test.ts` | **PASS** | Detached media marked `CLEANUP_PENDING` with grace timestamp |
 | Reattachment during grace window | `tests/product-managed-media-write.test.ts` | **PASS** | Restores `CLEANUP_PENDING` to `READY`, clears deletion timer |
@@ -367,7 +369,7 @@ Detailed inspection of the 8 real-browser viewport screenshots in `artifacts/pha
 - **S3 Protocol Conformance**: Generic conditional `If-None-Match: *`, safe concurrent same-content idempotency, conflicting-content conflict rejection (`tests/media-s3-storage.test.ts`).
 - **Provider Neutrality**: Neutral `storageProviderKey` strings; immutable object keys based on SHA-256 and object role; zero Cloudflare-specific schema constructs.
 - **Disaster Recovery Model**: PostgreSQL metadata + private canonical masters + deterministic processing profile version/hash enables 100% automated regeneration of public delivery renditions.
-- **Provider Migration Protocol**: Documented five-stage migration runbook: `COPY → VERIFY → CUTOVER → SOAK → RETIRE` (`docs/runbooks/media-operations.md`).
+- **Provider Migration Protocol**: Documented five-stage migration runbook: `COPY → VERIFY → CUTOVER → SOAK → RETIRE` (`docs/superpowers/evidence/phase6-media-operations-runbook.md`).
 - **Cloudflare R2 Status**: `R2_INTEGRATION_PENDING` — live isolated non-production credentials not yet provisioned; no simulated live proof claimed.
 
 ---
@@ -384,12 +386,14 @@ Detailed inspection of the 8 real-browser viewport screenshots in `artifacts/pha
 
 #### 2. Consolidated Phase-6 Media Acceptance Suite (Plan Step 1 Consolidated)
 - **Command**: `npx tsx --test --test-concurrency=1 tests/media-domain.test.ts tests/media-fixtures.test.ts tests/media-image-security.test.ts tests/media-processing-profile.test.ts tests/media-renditions.test.ts tests/media-delivery-contract.test.ts tests/media-storage-contract.test.ts tests/media-local-storage.test.ts tests/media-s3-storage.test.ts tests/media-r2-integration.test.ts tests/media-ingest-service.test.ts tests/media-lifecycle-reconciliation.test.ts tests/media-upload-route.test.ts tests/product-managed-media-write.test.ts tests/product-card-responsive-media.test.ts tests/product-detail-responsive-media.test.ts tests/public-managed-media-query.test.ts tests/media-operations-telemetry.test.ts tests/media-browser-network-qa.test.ts`
-- **Suites**: 34
+- **Test Files Invoked**: 19 test files
+- **Runner-Reported Suites**: 34 suites
 - **Total Tests**: 196
 - **Passed**: 196
 - **Failed**: 0
 - **Exit Code**: 0
 - **Duration**: 46022.8086ms (~46.0s)
+- **Summary**: 19 test files / 34 runner-reported suites / 196 tests (all passed, exit code 0)
 - **R2 Diagnostic Suite**: `tests/media-r2-integration.test.ts` passed in diagnostic mode recording `R2_INTEGRATION_PENDING`.
 
 #### 3. Real Browser QA Suite (Task 24 CDP)
@@ -455,6 +459,10 @@ The complete visual and network evidence bundle is packaged and verified at:
 TASK 25 CLASSIFICATION: NOT_READY
 REASON: REAL_PROVIDER_INTEGRATION_PENDING
 ```
+
+**Persistence & Rollout Readiness Distinction**:
+- **Persistence Contract (Local / Implemented)**: **PASS**
+- **Shared Migration / Rollout Readiness**: **BLOCKED / INCIDENT-AWARE** (due to `MISMATCH_UNRESOLVED` and `PHASE6_SHARED_SCHEMA_APPLIED_EARLY_INCIDENT`)
 
 **Active Hard Gates Summary**:
 1. `REAL_PROVIDER_INTEGRATION_PENDING`: Live non-production Cloudflare R2 credentials/buckets not yet provisioned; implementation is verified against local and S3-compatible abstractions.
