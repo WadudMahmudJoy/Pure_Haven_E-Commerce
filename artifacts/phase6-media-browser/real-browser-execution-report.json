@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-09-09T18:00:33.170Z",
+  "harness": {
+    "runner": "Node.js 20+ test runner (tsx --test)",
+    "protocol": "Chrome DevTools Protocol (CDP) WebSocket",
+    "browser": "Google Chrome (Headless New)",
+    "port": 3106
+  },
+  "screenshots": [
+    "desktop-1280x800-pdp.png",
+    "highdpi-1280x800-pdp.png",
+    "mobile-390x844-shop.png",
+    "tablet-768x1024-shop.png"
+  ],
+  "consoleErrorsCount": 0,
+  "uncaughtExceptionsCount": 0,
+  "totalRequestsLogged": 116,
+  "totalResponsesLogged": 476
+}

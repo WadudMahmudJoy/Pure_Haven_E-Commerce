@@ -321,6 +321,7 @@ export default function ProgressiveProductGrid({
             isUpcoming={product.isUpcoming}
             badgeText={product.badgeText}
             badgeTone={product.badgeTone}
+            media={product.media}
           />
         ))}
       </div>

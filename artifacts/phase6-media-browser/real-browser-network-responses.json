@@ -1,0 +1,238 @@
+{
+  "totalMediaResponses": 36,
+  "sampleResponse": {
+    "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-400.avif",
+    "status": 200,
+    "statusText": "OK",
+    "mimeType": "image/avif",
+    "headers": {
+      "Cache-Control": "public, max-age=0",
+      "ETag": "W/\"d6b-1a08753cb88\"",
+      "Connection": "keep-alive",
+      "Accept-Ranges": "bytes",
+      "Content-Length": "3435",
+      "Keep-Alive": "timeout=5",
+      "Date": "Wed, 09 Sep 2026 18:00:15 GMT",
+      "Last-Modified": "Wed, 09 Sep 2026 18:00:10 GMT",
+      "Content-Type": "image/avif"
+    }
+  },
+  "responses": [
+    {
+      "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/a1023fef-052f-4229-bfd1-6bc475d9e5f8/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/a1023fef-052f-4229-bfd1-6bc475d9e5f8/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/a1023fef-052f-4229-bfd1-6bc475d9e5f8/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-800.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.webp",
+      "status": 200,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.webp",
+      "status": 304,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.webp",
+      "status": 304,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/a1023fef-052f-4229-bfd1-6bc475d9e5f8/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/4d793566-9402-4862-b331-0ab6a609f6cf/rendition-1500.webp",
+      "status": 200,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/4d793566-9402-4862-b331-0ab6a609f6cf/rendition-400.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.webp",
+      "status": 304,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-800.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-800.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.webp",
+      "status": 304,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/765f9d5b-7e3a-4f13-bca0-070872fbf46b/rendition-1500.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/a1023fef-052f-4229-bfd1-6bc475d9e5f8/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/e3a89892-86d0-42aa-b3dc-43123fa7c821/rendition-800.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-400.avif",
+      "status": 304,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/4d793566-9402-4862-b331-0ab6a609f6cf/rendition-1500.webp",
+      "status": 304,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-800.avif",
+      "status": 200,
+      "mimeType": "image/avif",
+      "cacheControl": "public, max-age=0"
+    },
+    {
+      "url": "http://localhost:3106/media/public/f23b1df4-1ad1-4e73-8556-4bdf1650aa6b/rendition-1500.webp",
+      "status": 200,
+      "mimeType": "image/webp",
+      "cacheControl": "public, max-age=0"
+    }
+  ]
+}

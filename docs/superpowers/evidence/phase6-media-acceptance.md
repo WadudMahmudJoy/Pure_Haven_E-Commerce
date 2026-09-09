@@ -138,3 +138,71 @@ Task 24 validates client delivery integrity, responsive viewport scaling, and pu
 
 - **Status**: `PRODUCTION_DIRECT_DELIVERY=OPEN`
 - **Reason**: Cloudflare R2 provider integration remains `R2_INTEGRATION_PENDING` because live non-production credentials have not yet been provisioned outside Git. Production direct delivery will transition from OPEN to CLOSED only upon live execution of the end-to-end R2 contract suite.
+
+---
+
+### C. Real Headless Browser & CDP Network Verification (Task 24 Completion)
+
+Authoritative real-browser testing was executed via Chrome DevTools Protocol (CDP) WebSocket communication with headless Google Chrome (`chrome.exe --headless=new`), connected directly to an active local production Next.js instance (`PORT=3106`) powered by a disposable PostgreSQL database.
+
+#### 1. Browser Test Tooling & Environment
+- **Runner**: Node.js 20+ test runner (`tsx --test`)
+- **Browser**: Google Chrome 134+ (`--headless=new`)
+- **Protocol**: Native WebSocket CDP (`Page`, `Runtime`, `Network`, `DOM`, `Emulation`)
+- **Application Server**: Next.js Production Server (`next start -p 3106`)
+- **Database**: Local Disposable PostgreSQL (`127.0.0.1:55439`) via `disposableDbGuard`
+- **Delivery Mode**: Local HTTP file serving (`public/media/...`)
+- **Test Suite**: `tests/media-real-browser-qa.test.ts` (8 passed, 0 failed)
+
+#### 2. Live DOM `currentSrc` & Viewport Matrix
+| Page | Component | Viewport | DPR | Rendered Width | `img.currentSrc` Rendition | Requested Format | Selection Evaluation |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `/shop` | `ProductCard` | `390x844` | 2 | 153px | `rendition-400.avif` | `image/avif` | **Sub-maximal** (400w selected, <= 800w target) |
+| `/shop` | `ProductCard` | `768x1024` | 1 | 321px | `rendition-400.avif` | `image/avif` | **Sub-maximal** (400w selected, <= 800w target) |
+| `/product/2` | `ProductDetailsClient` | `1280x800` | 1 | 559px | `rendition-800.avif` | `image/avif` | **Sub-maximal** (800w selected, < 1500w) |
+| `/product/2` | `ProductDetailsClient` | `1280x800` | 2 | 559px | `rendition-1500.avif` | `image/avif` | **High-DPI** (1500w selected for 2x pixel ratio) |
+
+*Proof of Sub-Maximal Selection*: In mobile and tablet contexts, the browser engine evaluated `sizes` and selected `rendition-400.avif`, proving the browser does not trivially select the maximal candidate (1500w).
+
+#### 3. Real Browser Network Responses & Cache Audit
+- **Sample Request**: `GET http://localhost:3106/media/public/<id>/rendition-400.avif`
+- **HTTP Status**: `200 OK`
+- **Content-Type**: `image/avif`
+- **Local HTTP Cache-Control**: `public, max-age=0` (Next.js local static file server)
+- **Local Cache Evaluation**: `LOCAL_HTTP_IMMUTABLE_CACHE = NOT PROVEN` (local HTTP serving layer emits `max-age=0` despite adapter immutable metadata; immutable caching is verified at the adapter level and will be served with `public, max-age=31536000, immutable` upon production CDN/R2 deployment).
+- **Production CDN Cache**: `R2_INTEGRATION_PENDING` (configured intent: `public, max-age=31536000, immutable`).
+
+#### 4. Real Network Lazy-Loading Verification
+- **Initial Page Load (`/shop`)**: Requests to secondary carousel slide 2 (`textureMediaId`) = **0**.
+- **Interactive Navigation**: Upon simulating user click on `button[aria-label="Next image"]`, slide 2 request was dispatched and logged in network events within 800ms.
+- **Result**: Proves structural lazy loading operates at the browser network layer, not merely markup declaration.
+
+#### 5. Suspension Hard Browser Gate Proof
+- **Fixture Setup**: Managed primary media suspended via `deliveryDisabledAt = NOW()`, with stale compatibility markers in `ProductImage.url` and `Product.image` (`stale-suspended-compat-marker.webp`).
+- **DOM HTML Stale Marker Occurrences**: **0**
+- **DOM Suspended Media ID Occurrences**: **0**
+- **Network Requests to Stale Markers**: **0**
+- **Network Requests to Canonical Masters**: **0**
+- **Fallback Behavior**: Main display cleanly rendered safe secondary managed media (`safeSecMediaId`).
+
+#### 6. Zero Master & Private Leak Audit Across All Surfaces
+- Scanned surfaces: `/shop` DOM, `/product/<id>` DOM, browser network URLs, console logs.
+- Evaluated patterns: `canonical-master`, `PRIVATE_SOURCE`, `staging/`, `master.webp`, `master.png`, `storageProviderKey`, `stagingProviderKey`, `canonicalMasterObjectId`, `AKIA`, `s3://`.
+- **Total Leaks Detected**: **0**.
+
+#### 7. Browser Console & Page Safety
+- **Console Errors**: 0
+- **Uncaught Page Exceptions**: 0
+- **Unexpected HTTP >= 400 Responses**: 0
+
+#### 8. Real Viewport Screenshots
+- `mobile-390x844-shop.png` (390x844, DPR 2) — Shop catalog grid layout, 2-column mobile cards
+- `tablet-768x1024-shop.png` (768x1024, DPR 1) — Shop catalog grid layout, 2-column tablet cards
+- `desktop-1280x800-pdp.png` (1280x800, DPR 1) — Product detail page layout with eager priority LCP
+- `highdpi-1280x800-pdp.png` (1280x800, DPR 2) — Product detail page with high-DPI 1500w rendition
+
+#### 9. Visual Evidence Bundle
+- **ZIP Path**: `e:\Joy\pure-haven-bd-joy\pure-haven-bd\artifacts\phase6-media-browser.zip`
+- **Downloads Path**: `C:\Users\wadud\Downloads\phase6-media-browser.zip`
+- **SHA-256**: `5f81d15ce3c94d9c307131fc0fb3641fee00791661b1bd56159a6b085e166348`
+- **Total Files**: 23 (4 screenshots, 3 network/execution JSON reports, 16 comparison fixtures)

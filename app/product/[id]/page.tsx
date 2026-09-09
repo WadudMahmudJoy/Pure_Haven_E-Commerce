@@ -1,5 +1,5 @@
-﻿import { notFound } from "next/navigation";
-import { getProductById } from "@/lib/getProducts";
+import { notFound } from "next/navigation";
+import { getPublicProductDetailQuery } from "@/lib/catalog/publicCatalogQuery";
 import ProductDetailsClient from "@/components/product/ProductDetailsClient";
 
 type ProductPageProps = {
@@ -16,14 +16,19 @@ export default async function ProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
-  const product = await getProductById(productId);
+  const product = await getPublicProductDetailQuery(productId);
 
   if (!product) {
     notFound();
   }
 
-  return <ProductDetailsClient product={product} />;
+  return (
+    <ProductDetailsClient
+      product={{
+        ...product,
+        subcategory: product.subcategory ?? undefined,
+        description: product.description ?? undefined,
+      }}
+    />
+  );
 }
-
-
-
