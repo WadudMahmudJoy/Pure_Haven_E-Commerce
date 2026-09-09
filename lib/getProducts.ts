@@ -1,9 +1,9 @@
 import {
   getCachedProductListRows,
   getCachedProductRow,
-  getCachedProductRows,
   peekCachedProductRowFromList,
 } from "@/lib/catalogRead";
+import type { PublicProductMediaProjection } from "@/lib/catalog/types";
 
 export type ProductVariant = {
   id: number;
@@ -29,6 +29,7 @@ export type Product = {
   isUpcoming?: boolean;
   badgeText?: string | null;
   badgeTone?: string;
+  media?: PublicProductMediaProjection;
 };
 
 function mapProduct(product: {

@@ -1,6 +1,18 @@
+import type { PublicResponsiveImageDto } from "@/lib/media/publicMediaDto";
+
 export type PublicSortMode = "latest" | "price-asc" | "price-desc";
 
 export type AdminCatalogFilter = "all" | "hot" | "upcoming" | "discount" | "badge";
+
+export type PublicProductGalleryImage =
+  | Readonly<{ kind: "managed"; media: PublicResponsiveImageDto; altText: string }>
+  | Readonly<{ kind: "legacy"; src: string; altText: string }>;
+
+export type PublicProductMediaProjection = Readonly<{
+  gallery: readonly PublicProductGalleryImage[];
+  primarySrc: string | null;
+  primaryKind: "managed" | "legacy" | "fallback" | "unavailable";
+}>;
 
 export type PublicProductCardDTO = {
   id: number;
@@ -18,6 +30,7 @@ export type PublicProductCardDTO = {
   badgeText: string | null;
   badgeTone: string;
   hasVariants: boolean;
+  media?: PublicProductMediaProjection;
 };
 
 export type PublicProductVariantDTO = {

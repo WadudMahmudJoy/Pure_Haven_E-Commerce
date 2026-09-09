@@ -7,8 +7,204 @@ import type {
   PublicProductCardDTO,
   PublicProductDetailDTO,
   PublicProductVariantDTO,
+  PublicProductGalleryImage,
+  PublicProductMediaProjection,
 } from "./types";
 import { resolveSubcategoryBatch } from "./subcategoryResolution";
+import { ConfiguredMediaDeliveryResolver } from "@/lib/media/delivery";
+import {
+  buildPublicResponsiveImageDto,
+  type DeliveryReadyManagedMediaInput,
+  type PublicResponsiveImageDto,
+} from "@/lib/media/publicMediaDto";
+
+type RawProductImageInput = {
+  productId?: number;
+  url: string;
+  sourceKind?: string | null;
+  managedMediaId?: string | null;
+  altText?: string | null;
+};
+
+async function fetchPublicManagedMediaMap(
+  managedMediaIds: string[]
+): Promise<Map<string, PublicResponsiveImageDto>> {
+  const map = new Map<string, PublicResponsiveImageDto>();
+  if (managedMediaIds.length === 0) {
+    return map;
+  }
+
+  const deliveryResolver = new ConfiguredMediaDeliveryResolver(
+    process.env.MEDIA_PUBLIC_ORIGIN || "http://localhost:3000/media"
+  );
+
+  const managedRows = await prisma.managedMedia.findMany({
+    where: {
+      id: { in: managedMediaIds },
+      lifecycleState: { in: ["READY", "CLEANUP_PENDING"] },
+      deliveryDisabledAt: null,
+    },
+    include: {
+      activeProcessingRun: {
+        include: {
+          mediaObjects: {
+            where: {
+              role: "RENDITION",
+              accessClass: "PUBLIC_DELIVERY",
+              deletedAt: null,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  for (const row of managedRows) {
+    if (
+      row.activeProcessingRun &&
+      row.activeProcessingRun.mediaObjects &&
+      row.activeProcessingRun.mediaObjects.length > 0
+    ) {
+      try {
+        const deliveryInput: DeliveryReadyManagedMediaInput = {
+          mediaId: row.id,
+          lifecycleState: row.lifecycleState as "READY" | "CLEANUP_PENDING",
+          deliveryDisabledAt: row.deliveryDisabledAt,
+          activeProfileVersion: row.activeProcessingRun.profileVersion,
+          width: row.sourceWidth ?? 1200,
+          height: row.sourceHeight ?? 900,
+          objects: row.activeProcessingRun.mediaObjects.map((o) => ({
+            variantKey: o.variantKey,
+            role: o.role as "MASTER" | "RENDITION",
+            accessClass: o.accessClass as "PRIVATE_SOURCE" | "PUBLIC_DELIVERY",
+            mimeType: o.mimeType,
+            width: o.width,
+            height: o.height,
+            byteSize: o.byteSize,
+            objectKey: o.objectKey,
+            deletedAt: o.deletedAt,
+          })),
+        };
+
+        const dto = buildPublicResponsiveImageDto(deliveryInput, deliveryResolver);
+        map.set(row.id, dto);
+      } catch {
+        // Skip incomplete or invalid rendition sets
+      }
+    }
+  }
+
+  return map;
+}
+
+function projectProductMedia(
+  rawImages: RawProductImageInput[],
+  productImage: string,
+  managedMediaMap: Map<string, PublicResponsiveImageDto>
+): {
+  media: PublicProductMediaProjection;
+  displayImage: string;
+  displayImages: string[];
+} {
+  const gallery: PublicProductGalleryImage[] = [];
+  const safeImageUrls: string[] = [];
+  const suspendedUrls = new Set<string>();
+  const suspendedMediaIds = new Set<string>();
+
+  for (const img of rawImages) {
+    if (img.sourceKind === "MANAGED") {
+      const managedDto = img.managedMediaId ? managedMediaMap.get(img.managedMediaId) : undefined;
+      if (managedDto) {
+        gallery.push({
+          kind: "managed",
+          media: managedDto,
+          altText: img.altText ?? "",
+        });
+        safeImageUrls.push(managedDto.fallbackSrc);
+      } else {
+        if (img.url) {
+          suspendedUrls.add(img.url);
+        }
+        if (img.managedMediaId) {
+          suspendedMediaIds.add(img.managedMediaId);
+        }
+      }
+    } else {
+      // Legacy image (LEGACY_LOCAL, LEGACY_EXTERNAL, or unclassified legacy)
+      gallery.push({
+        kind: "legacy",
+        src: img.url,
+        altText: img.altText ?? "",
+      });
+      safeImageUrls.push(img.url);
+    }
+  }
+
+  let primarySrc: string | null = null;
+  let primaryKind: "managed" | "legacy" | "fallback" | "unavailable" = "unavailable";
+
+  if (gallery.length > 0) {
+    const firstSafe = gallery[0];
+    if (firstSafe.kind === "managed") {
+      primaryKind = "managed";
+      primarySrc = firstSafe.media.fallbackSrc;
+    } else {
+      primaryKind = "legacy";
+      primarySrc = firstSafe.src;
+    }
+  } else if (rawImages.length === 0) {
+    // 0 relational images: fallback to product.image if valid and non-suspended
+    const isSuspended =
+      suspendedUrls.has(productImage) ||
+      Array.from(suspendedMediaIds).some((id) => productImage.includes(id));
+
+    if (productImage && !isSuspended) {
+      primaryKind = "fallback";
+      primarySrc = productImage;
+    } else {
+      primaryKind = "unavailable";
+      primarySrc = null;
+    }
+  } else {
+    // Relational images were present, but all were suspended/undeliverable
+    primaryKind = "unavailable";
+    primarySrc = null;
+  }
+
+  // Derive legacy compatibility displayImage and displayImages
+  let displayImage: string;
+  if (primarySrc !== null) {
+    displayImage = primarySrc;
+  } else {
+    const isSuspended =
+      suspendedUrls.has(productImage) ||
+      Array.from(suspendedMediaIds).some((id) => productImage.includes(id));
+    if (productImage && !isSuspended && rawImages.length === 0) {
+      displayImage = productImage;
+    } else {
+      displayImage = "";
+    }
+  }
+
+  let displayImages: string[];
+  if (safeImageUrls.length > 0) {
+    displayImages = safeImageUrls;
+  } else if (displayImage !== "") {
+    displayImages = [displayImage];
+  } else {
+    displayImages = [];
+  }
+
+  return {
+    media: {
+      gallery,
+      primarySrc,
+      primaryKind,
+    },
+    displayImage,
+    displayImages,
+  };
+}
 
 export async function getPublicCatalogQuery(
   params: ParsedPublicCatalogParams
@@ -164,29 +360,43 @@ export async function getPublicCatalogQuery(
           select: {
             productId: true,
             url: true,
+            sourceKind: true,
+            managedMediaId: true,
+            altText: true,
           },
         })
       : Promise.resolve([]),
     resolveSubcategoryBatch(products),
   ]);
 
-  const groupedImages = new Map<number, string[]>();
+  const managedIds = Array.from(
+    new Set(
+      productImages
+        .map((img) => img.managedMediaId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    )
+  );
+
+  const managedMediaMap = await fetchPublicManagedMediaMap(managedIds);
+
+  const groupedImages = new Map<number, RawProductImageInput[]>();
   for (const img of productImages) {
     let list = groupedImages.get(img.productId);
     if (!list) {
       list = [];
       groupedImages.set(img.productId, list);
     }
-    list.push(img.url);
+    list.push(img);
   }
 
   // 8. Project to PublicProductCardDTO (Decimal -> Number presentation serialization)
   const items: PublicProductCardDTO[] = products.map((p) => {
-    const relationalImages = groupedImages.get(p.id);
-    const images =
-      relationalImages && relationalImages.length > 0
-        ? relationalImages.slice(0, 4)
-        : [p.image];
+    const rawList = groupedImages.get(p.id) ?? [];
+    const { media, displayImage, displayImages } = projectProductMedia(
+      rawList,
+      p.image,
+      managedMediaMap
+    );
 
     let subcategoryName: string | null = null;
     if (p.categoryId !== null && p.subcategory) {
@@ -203,8 +413,8 @@ export async function getPublicCatalogQuery(
       price: Number(p.price),
       compareAtPrice:
         p.compareAtPrice == null ? null : Number(p.compareAtPrice),
-      image: p.image,
-      images,
+      image: displayImage,
+      images: displayImages.slice(0, 4),
       category: p.category,
       categoryName: p.categoryRel?.name ?? p.category ?? null,
       subcategoryName,
@@ -214,6 +424,7 @@ export async function getPublicCatalogQuery(
       badgeText: p.badgeText,
       badgeTone: p.badgeTone,
       hasVariants: (p._count?.variants ?? 0) > 0,
+      media,
     };
   });
 
@@ -260,7 +471,11 @@ export async function getPublicProductDetailQuery(
       images: {
         orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         select: {
+          id: true,
           url: true,
+          sourceKind: true,
+          managedMediaId: true,
+          altText: true,
         },
       },
       description: true,
@@ -287,7 +502,25 @@ export async function getPublicProductDetailQuery(
     return null;
   }
 
-  const subcategoryMap = await resolveSubcategoryBatch([product]);
+  const managedIds = Array.from(
+    new Set(
+      product.images
+        .map((img) => img.managedMediaId)
+        .filter((mediaId): mediaId is string => typeof mediaId === "string" && mediaId.length > 0)
+    )
+  );
+
+  const [managedMediaMap, subcategoryMap] = await Promise.all([
+    fetchPublicManagedMediaMap(managedIds),
+    resolveSubcategoryBatch([product]),
+  ]);
+
+  const { media, displayImage, displayImages } = projectProductMedia(
+    product.images,
+    product.image,
+    managedMediaMap
+  );
+
   let subcategoryName: string | null = null;
   if (product.categoryId !== null && product.subcategory) {
     const catMap = subcategoryMap.get(product.categoryId);
@@ -296,11 +529,6 @@ export async function getPublicProductDetailQuery(
         catMap.get(product.subcategory.trim().toLowerCase()) ?? null;
     }
   }
-
-  const images =
-    product.images.length > 0
-      ? product.images.map((i) => i.url).slice(0, 4)
-      : [product.image];
 
   const categoryName = product.categoryRel?.name ?? product.category ?? null;
 
@@ -318,8 +546,8 @@ export async function getPublicProductDetailQuery(
     price: Number(product.price),
     compareAtPrice:
       product.compareAtPrice == null ? null : Number(product.compareAtPrice),
-    image: product.image,
-    images,
+    image: displayImage,
+    images: displayImages.slice(0, 4),
     category: product.category,
     categoryName,
     subcategoryName,
@@ -333,6 +561,7 @@ export async function getPublicProductDetailQuery(
     badgeTone: product.badgeTone,
     hasVariants: variants.length > 0,
     variants,
+    media,
   };
 }
 
