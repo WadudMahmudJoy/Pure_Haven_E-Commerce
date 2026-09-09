@@ -5,7 +5,9 @@ import { useMemo, useState } from "react";
 import { Check, ShoppingBag } from "lucide-react";
 import { useCart } from "@/components/cart/CartContext";
 import SafeImage from "@/components/ui/SafeImage";
+import ResponsiveProductImage from "@/components/ui/ResponsiveProductImage";
 import { normalizeImageSrc } from "@/lib/imagePaths";
+import type { PublicProductMediaProjection } from "@/lib/catalog/types";
 
 type ProductVariant = {
   id: number;
@@ -28,6 +30,7 @@ type Product = {
   stock?: number;
   variants?: ProductVariant[];
   badgeText?: string | null;
+  media?: PublicProductMediaProjection;
 };
 
 type ProductDetailsClientProps = {
@@ -69,6 +72,14 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
     variantImage ? variantImage : selectedBaseGalleryImage,
     { category: product.category }
   );
+
+  const selectedMediaItem =
+    product.media?.gallery && product.media.gallery.length > 0
+      ? product.media.gallery[selectedBaseIdx] ?? product.media.gallery[0]
+      : null;
+
+  const isManagedActive =
+    !variantImage && selectedMediaItem?.kind === "managed";
 
   const oldPrice =
     typeof product.compareAtPrice === "number" && product.compareAtPrice > activePrice
@@ -123,7 +134,7 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
         image: activeImage,
         category: product.category,
         stock: activeStock,
-      } as any);
+      } as unknown as Parameters<typeof addToCart>[0]);
     }
 
     setAdded(true);
@@ -143,17 +154,30 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
         <section className="grid gap-10 rounded-[28px] border border-[#ead9d1] bg-white p-5 shadow-sm lg:grid-cols-[1.05fr_0.95fr] lg:p-8">
           <div className="space-y-4">
             <div className="overflow-hidden rounded-[24px] border border-[#ead9d1] bg-[#f8f3ef]">
-              <SafeImage
-                src={activeImage}
-                alt={selectedVariant ? `${product.name} ${selectedVariant.label}` : product.name}
-                category={product.category}
-                className="aspect-square w-full object-cover"
-                width={1000}
-                height={1000}
-                sizes="(max-width: 768px) 100vw, 50vw"
-                quality={78}
-                priority
-              />
+              {isManagedActive && selectedMediaItem?.kind === "managed" ? (
+                <ResponsiveProductImage
+                  image={selectedMediaItem.media}
+                  alt={selectedMediaItem.altText || product.name}
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  loading="eager"
+                  fetchPriority="high"
+                  className="aspect-square w-full object-cover"
+                  width={1000}
+                  height={1000}
+                />
+              ) : (
+                <SafeImage
+                  src={activeImage}
+                  alt={selectedVariant ? `${product.name} ${selectedVariant.label}` : product.name}
+                  category={product.category}
+                  className="aspect-square w-full object-cover"
+                  width={1000}
+                  height={1000}
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  quality={78}
+                  priority
+                />
+              )}
             </div>
 
             {/* Base gallery thumbnail strip — only shown when gallery has > 1 image */}
