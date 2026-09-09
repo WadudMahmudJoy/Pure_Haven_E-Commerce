@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AdminNav from "@/components/admin/AdminNav";
 import {
@@ -12,8 +12,14 @@ import {
   canAddGalleryItem,
   canRemoveGalleryItem,
   serializeGalleryPayload,
+  toAdminManagedUploadStatus,
+  applyManagedUploadStatus,
+  boundedStatusPollDelays,
+  canSaveProduct,
   type AdminGalleryItem,
+  type AdminGalleryManagedItem,
 } from "@/lib/catalog/adminGalleryState";
+import type { AdminProductGalleryItemDto } from "@/lib/catalog/types";
 
 type Product = {
   id: number;
@@ -22,6 +28,7 @@ type Product = {
   compareAtPrice?: number | null;
   image: string;
   images?: string[];
+  gallery?: AdminProductGalleryItemDto[];
   category: string;
   subcategory?: string | null;
   description?: string | null;
@@ -124,12 +131,41 @@ export default function EditProductPage() {
           );
         }
 
-        setGallery(
-          initialImages.map((url, idx) => ({
-            id: `gallery-init-${idx}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            url,
-          }))
-        );
+        if (Array.isArray(product.gallery) && product.gallery.length > 0) {
+          setGallery(
+            product.gallery.map((item, idx) => {
+              if (item.sourceKind === "MANAGED" && item.managedMediaId) {
+                return {
+                  id: `gallery-init-${idx}-${item.productImageId}`,
+                  kind: "managed" as const,
+                  managedMediaId: item.managedMediaId,
+                  previewUrl: item.previewUrl,
+                  url: item.previewUrl,
+                  status: "Ready" as const,
+                  idempotencyKey: `init-${item.managedMediaId}`,
+                  altText: item.altText,
+                };
+              }
+              return {
+                id: `gallery-init-${idx}-${item.productImageId}`,
+                kind: "legacy-existing" as const,
+                productImageId: item.productImageId,
+                previewUrl: item.previewUrl,
+                url: item.previewUrl,
+                sourceKind: item.sourceKind as "LEGACY_LOCAL" | "LEGACY_EXTERNAL",
+                altText: item.altText,
+              };
+            })
+          );
+        } else {
+          setGallery(
+            initialImages.map((url, idx) => ({
+              id: `gallery-init-${idx}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              url,
+              previewUrl: url,
+            }))
+          );
+        }
       } catch (error) {
         if (alive) {
           setMessage(error instanceof Error ? error.message : "Failed to load product.");
@@ -147,6 +183,65 @@ export default function EditProductPage() {
       alive = false;
     };
   }, [productId]);
+
+  // Track temporary Object URLs for unmount revocation
+  const activeBlobUrlsRef = useRef<Set<string>>(new Set());
+
+  const revokeBlobUrl = useCallback((blobUrl: string) => {
+    if (blobUrl && blobUrl.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch {}
+      activeBlobUrlsRef.current.delete(blobUrl);
+    }
+  }, []);
+
+  useEffect(() => {
+    const urls = activeBlobUrlsRef.current;
+    return () => {
+      // Clean up any remaining temporary object URLs on unmount
+      for (const blobUrl of urls) {
+        try {
+          URL.revokeObjectURL(blobUrl);
+        } catch {}
+      }
+      urls.clear();
+    };
+  }, []);
+
+  const pollMediaStatus = useCallback(
+    async (mediaId: string, itemId: string) => {
+      const delays = boundedStatusPollDelays(30000);
+      for (const delay of delays) {
+        await new Promise((r) => setTimeout(r, delay));
+
+        try {
+          const res = await fetch(`/api/media/uploads/${mediaId}`, {
+            cache: "no-store",
+          });
+          if (!res.ok) continue;
+          const statusData = await res.json();
+          const nextStatus = toAdminManagedUploadStatus(statusData);
+
+          setGallery((prev) =>
+            prev.map((it) => {
+              if (it.id !== itemId || !("kind" in it) || it.kind !== "managed") {
+                return it;
+              }
+              return applyManagedUploadStatus(it, statusData, revokeBlobUrl);
+            })
+          );
+
+          if (nextStatus !== "Processing") {
+            return;
+          }
+        } catch {
+          // Network failure during polling; continue next attempt
+        }
+      }
+    },
+    [revokeBlobUrl]
+  );
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -168,22 +263,62 @@ export default function EditProductPage() {
     }));
   }
 
-  async function uploadImage(file: File) {
+  async function uploadManagedMedia(file: File, idempotencyKey: string) {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("purpose", "PRODUCT_IMAGE");
 
-    const res = await fetch("/api/upload", {
+    const res = await fetch("/api/media/uploads", {
       method: "POST",
+      headers: {
+        "Idempotency-Key": idempotencyKey,
+      },
       body: formData,
     });
 
     const data = await res.json();
 
-    if (!res.ok || !data?.imagePath) {
-      throw new Error(data?.message || "Image upload failed.");
+    if (!res.ok || !data?.mediaId) {
+      throw new Error(data?.message || "Managed media upload failed.");
     }
 
-    return data.imagePath as string;
+    return data;
+  }
+
+  async function handleRetry(item: AdminGalleryManagedItem) {
+    if (!item.file) {
+      setMessage("Original file not available for retry. Please choose another file.");
+      return;
+    }
+
+    setGallery((prev) =>
+      prev.map((it) =>
+        it.id === item.id ? { ...it, status: "Uploading" as const } : it
+      )
+    );
+
+    try {
+      const data = await uploadManagedMedia(item.file, item.idempotencyKey);
+      const status = toAdminManagedUploadStatus(data);
+
+      setGallery((prev) =>
+        prev.map((it) => {
+          if (it.id !== item.id || !("kind" in it) || it.kind !== "managed") return it;
+          return applyManagedUploadStatus(it, data, revokeBlobUrl);
+        })
+      );
+
+      if (status === "Processing") {
+        pollMediaStatus(data.mediaId, item.id);
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Retry failed.");
+      setGallery((prev) =>
+        prev.map((it) =>
+          it.id === item.id ? { ...it, status: "Retry" as const } : it
+        )
+      );
+    }
   }
 
   async function handleAddImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -199,23 +334,49 @@ export default function EditProductPage() {
     setUploadingImage(true);
     setMessage("");
 
+    const temporaryObjectUrl = URL.createObjectURL(file);
+    activeBlobUrlsRef.current.add(temporaryObjectUrl);
+    const idempotencyKey = crypto.randomUUID();
+    const itemId = `gallery-item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
     try {
-      const imagePath = await uploadImage(file);
+      const data = await uploadManagedMedia(file, idempotencyKey);
+      const status = toAdminManagedUploadStatus(data);
+
+      const initialItem: AdminGalleryManagedItem = {
+        id: itemId,
+        kind: "managed",
+        managedMediaId: data.mediaId,
+        previewUrl: data.previewUrl || temporaryObjectUrl,
+        url: data.previewUrl || temporaryObjectUrl,
+        temporaryObjectUrl: data.previewUrl ? undefined : temporaryObjectUrl,
+        status,
+        failureCode: data.failureCode,
+        idempotencyKey,
+        file,
+        altText: "",
+      };
+
+      if (data.previewUrl) {
+        revokeBlobUrl(temporaryObjectUrl);
+      }
+
       setGallery((prev) => {
         if (!canAddGalleryItem(prev)) {
           return prev;
         }
-        return [
-          ...prev,
-          {
-            id: `gallery-item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            url: imagePath,
-          },
-        ];
+        return [...prev, initialItem];
       });
+
       e.target.value = "";
+
+      if (status === "Processing") {
+        pollMediaStatus(data.mediaId, itemId);
+      }
     } catch (err) {
+      revokeBlobUrl(temporaryObjectUrl);
       setMessage(err instanceof Error ? err.message : "Image upload failed.");
+      e.target.value = "";
     } finally {
       setUploadingImage(false);
     }
@@ -233,6 +394,14 @@ export default function EditProductPage() {
     if (!canRemoveGalleryItem(gallery)) {
       setMessage("At least one image is required.");
       return;
+    }
+    const itemToRemove = gallery[index];
+    if (
+      itemToRemove &&
+      "temporaryObjectUrl" in itemToRemove &&
+      itemToRemove.temporaryObjectUrl
+    ) {
+      revokeBlobUrl(itemToRemove.temporaryObjectUrl);
     }
     setGallery((prev) => {
       if (!canRemoveGalleryItem(prev)) {
@@ -253,10 +422,16 @@ export default function EditProductPage() {
       return;
     }
 
+    if (!canSaveProduct(gallery)) {
+      setMessage("All managed media images must finish processing before saving.");
+      setLoading(false);
+      return;
+    }
+
     try {
       const galleryPayload = serializeGalleryPayload(gallery);
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         id: productId,
         name: form.name.trim(),
         price: Number(form.price),
@@ -272,6 +447,10 @@ export default function EditProductPage() {
         badgeText: form.badgeText.trim() || null,
         badgeTone: form.badgeTone,
       };
+
+      if (galleryPayload.gallery) {
+        payload.gallery = galleryPayload.gallery;
+      }
 
       const res = await fetch("/api/products", {
         method: "PUT",
@@ -493,26 +672,104 @@ export default function EditProductPage() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {gallery.map((item, index) => {
                   const isPrimary = index === 0;
+                  const itemPreview =
+                    "previewUrl" in item && item.previewUrl
+                      ? item.previewUrl
+                      : item.url;
+                  const isManaged = "kind" in item && item.kind === "managed";
+                  const managedStatus = isManaged
+                    ? (item as AdminGalleryManagedItem).status
+                    : null;
                   return (
                     <div
                       key={item.id}
                       className="flex flex-col justify-between rounded-2xl border border-[#ead9d1] bg-white p-3 shadow-xs"
                     >
-                      <div className="relative mb-2 aspect-square w-full overflow-hidden rounded-xl bg-neutral-100">
-                        <img
-                          src={item.url}
-                          alt={`Product gallery image ${index + 1}`}
-                          className="h-full w-full object-cover"
-                        />
-                        <div className="absolute top-2 left-2 flex items-center gap-1">
-                          <span className="rounded-md bg-black/70 px-2 py-0.5 text-xs font-semibold text-white">
-                            #{index + 1}
-                          </span>
-                          {isPrimary ? (
-                            <span className="rounded-md bg-[#2e221d] px-2 py-0.5 text-xs font-semibold text-white">
-                              Primary
+                      <div>
+                        <div className="relative mb-2 aspect-square w-full overflow-hidden rounded-xl bg-neutral-100">
+                          <img
+                            src={itemPreview}
+                            alt={`Product gallery image ${index + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute top-2 left-2 flex items-center gap-1">
+                            <span className="rounded-md bg-black/70 px-2 py-0.5 text-xs font-semibold text-white">
+                              #{index + 1}
                             </span>
-                          ) : null}
+                            {isPrimary ? (
+                              <span className="rounded-md bg-[#2e221d] px-2 py-0.5 text-xs font-semibold text-white">
+                                Primary
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Status indicators */}
+                        {isManaged && managedStatus !== "Ready" ? (
+                          <div className="mb-2 flex items-center justify-between rounded-lg bg-[#fffaf7] p-2 text-xs">
+                            <span
+                              className={`font-semibold ${
+                                managedStatus === "Processing" ||
+                                managedStatus === "Uploading"
+                                  ? "text-amber-700"
+                                  : managedStatus === "Retry"
+                                  ? "text-rose-700"
+                                  : "text-red-700"
+                              }`}
+                            >
+                              {managedStatus === "Uploading"
+                                ? "Uploading..."
+                                : managedStatus === "Processing"
+                                ? "Processing..."
+                                : managedStatus === "Retry"
+                                ? "Failed"
+                                : "Invalid"}
+                            </span>
+                            {managedStatus === "Processing" ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  pollMediaStatus(
+                                    (item as AdminGalleryManagedItem)
+                                      .managedMediaId,
+                                    item.id
+                                  )
+                                }
+                                className="text-xs text-neutral-600 underline hover:text-black"
+                              >
+                                Refresh status
+                              </button>
+                            ) : managedStatus === "Retry" ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRetry(item as AdminGalleryManagedItem)
+                                }
+                                className="text-xs font-semibold text-rose-700 underline hover:text-rose-900"
+                              >
+                                Retry
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {/* Alt text field */}
+                        <div className="mb-2">
+                          <input
+                            type="text"
+                            aria-label={`Alt text for image ${index + 1}`}
+                            value={item.altText ?? ""}
+                            placeholder="Alt text"
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setGallery((prev) =>
+                                prev.map((it, idx) =>
+                                  idx === index ? { ...it, altText: val } : it
+                                )
+                              );
+                            }}
+                            className="w-full rounded-lg border border-[#ead9d1] px-2.5 py-1 text-xs outline-none"
+                          />
                         </div>
                       </div>
 
@@ -594,7 +851,7 @@ export default function EditProductPage() {
 
             <button
               type="submit"
-              disabled={loading || uploadingImage}
+              disabled={loading || uploadingImage || !canSaveProduct(gallery)}
               className="rounded-full bg-[#2e221d] px-6 py-3 text-sm font-semibold text-white hover:bg-[#7a5244] disabled:opacity-60"
             >
               {loading ? "Updating..." : "Update Product"}
